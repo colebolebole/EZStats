@@ -121,6 +121,14 @@ public final class WebServer {
                 change(exchange, false);
             } else if (method.equals("POST") && path.equals("/api/thermostat/nickname")) {
                 nickname(exchange);
+            } else if (method.equals("POST") && path.equals("/api/thermostat/folder")) {
+                thermostatFolder(exchange);
+            } else if (method.equals("POST") && path.equals("/api/folders")) {
+                folderCreate(exchange);
+            } else if (method.equals("POST") && path.equals("/api/folders/rename")) {
+                folderRename(exchange);
+            } else if (method.equals("POST") && path.equals("/api/folders/delete")) {
+                folderDelete(exchange);
             } else if (method.equals("POST") && path.equals("/api/login")) {
                 login(exchange);
             } else if (method.equals("POST") && path.equals("/api/logout")) {
@@ -255,7 +263,7 @@ public final class WebServer {
         }
         LinkManager.Session who = session.get();
         String body = "{\"player\":" + GSON.toJson(who.name()) + ",\"state\":"
-                + snapshots.jsonFor(accounts.ownedWithNicknames(who.player())) + "}";
+                + snapshots.jsonFor(accounts.view(who.player())) + "}";
         send(exchange, 200, "application/json; charset=utf-8", body.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -296,23 +304,11 @@ public final class WebServer {
      * not EZvac's, so it works even while EZvac's API is read-only.
      */
     private void nickname(HttpExchange exchange) throws IOException {
-        Optional<LinkManager.Session> session = session(exchange);
-        if (session.isEmpty()) {
-            json(exchange, 401, error("Not signed in."));
-            return;
-        }
-        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
-            json(exchange, 403, error("Missing X-EZStats header"));
-            return;
-        }
-        JsonObject body = readBody(exchange);
-        if (body == null) return;
-        String key;
-        String raw;
-        try {
-            key = body.get("key").getAsString();
-            raw = body.get("nickname").getAsString();
-        } catch (RuntimeException e) {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String key = text(call.body(), "key");
+        String raw = text(call.body(), "nickname");
+        if (key == null || raw == null) {
             json(exchange, 400, error("Bad request"));
             return;
         }
@@ -322,11 +318,123 @@ public final class WebServer {
                     + " characters, with no control characters."));
             return;
         }
-        if (!accounts.setNickname(session.get().player(), key, nickname)) {
+        if (!accounts.setNickname(call.session().player(), key, nickname)) {
             json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
             return;
         }
         json(exchange, 200, "{\"ok\":true}");
+    }
+
+    // --- folders: EZStats' own data, so they work while EZvac's API is read-only -----------------
+
+    /** {@code POST /api/folders {name}} makes a folder and answers with its id. */
+    private void folderCreate(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String name = folderName(exchange, call);
+        if (name == null) return;
+        AccountStore.FolderChange change = accounts.createFolder(call.session().player(), call.session().name(), name);
+        if (change.status() != AccountStore.FolderStatus.OK) {
+            folderError(exchange, change.status());
+            return;
+        }
+        json(exchange, 200, "{\"ok\":true,\"id\":" + GSON.toJson(change.id()) + "}");
+    }
+
+    /** {@code POST /api/folders/rename {id, name}}. */
+    private void folderRename(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String id = text(call.body(), "id");
+        String name = id == null ? null : folderName(exchange, call);
+        if (id == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        if (name == null) return;
+        folderResult(exchange, accounts.renameFolder(call.session().player(), id, name));
+    }
+
+    /** {@code POST /api/folders/delete {id}}: its thermostats go back to being in no folder. */
+    private void folderDelete(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String id = text(call.body(), "id");
+        if (id == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        folderResult(exchange, accounts.deleteFolder(call.session().player(), id));
+    }
+
+    /** {@code POST /api/thermostat/folder {key, folder}}: "" for no folder. */
+    private void thermostatFolder(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String key = text(call.body(), "key");
+        String folder = text(call.body(), "folder");
+        if (key == null || folder == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        folderResult(exchange, accounts.setFolder(call.session().player(), key, folder));
+    }
+
+    /** A folder's name from the body's "name", tidied. Answers the client and returns null if it isn't allowed. */
+    private String folderName(HttpExchange exchange, Call call) throws IOException {
+        String raw = text(call.body(), "name");
+        String name = raw == null ? null : Nicknames.clean(raw);
+        if (name == null || name.isEmpty()) {
+            json(exchange, 400, error("A folder's name is 1 to " + Nicknames.MAX_LENGTH
+                    + " characters, with no control characters."));
+            return null;
+        }
+        return name;
+    }
+
+    private void folderResult(HttpExchange exchange, AccountStore.FolderStatus status) throws IOException {
+        if (status == AccountStore.FolderStatus.OK) json(exchange, 200, "{\"ok\":true}");
+        else folderError(exchange, status);
+    }
+
+    private void folderError(HttpExchange exchange, AccountStore.FolderStatus status) throws IOException {
+        switch (status) {
+            case LIMIT -> json(exchange, 409, error("You can have up to " + AccountStore.MAX_FOLDERS + " folders."));
+            case DUPLICATE -> json(exchange, 409, error("You already have a folder with that name."));
+            case NOT_FOUND -> json(exchange, 404, error("No such folder."));
+            default -> json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+        }
+    }
+
+    // --- shared by the calls that change something -----------------------------------------------
+
+    private record Call(LinkManager.Session session, JsonObject body) {}
+
+    /**
+     * A POST from a signed-in browser with a small JSON body. Answers the client and returns null when
+     * it isn't signed in, lacks the custom header (a cross-site form can't set one), or sent a bad body.
+     */
+    private Call signedInCall(HttpExchange exchange) throws IOException {
+        Optional<LinkManager.Session> session = session(exchange);
+        if (session.isEmpty()) {
+            json(exchange, 401, error("Not signed in."));
+            return null;
+        }
+        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
+            json(exchange, 403, error("Missing X-EZStats header"));
+            return null;
+        }
+        JsonObject body = readBody(exchange);
+        return body == null ? null : new Call(session.get(), body);
+    }
+
+    /** A string field of a body, or null when it is missing or not a string. */
+    private static String text(JsonObject body, String field) {
+        try {
+            return body.get(field).getAsString();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private void logout(HttpExchange exchange) throws IOException {

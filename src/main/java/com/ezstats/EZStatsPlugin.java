@@ -37,13 +37,20 @@ public final class EZStatsPlugin extends JavaPlugin {
             return;
         }
 
+        if (!apiAtLeast(api.apiVersion(), 1, 8)) {
+            getLogger().severe("EZStats needs EZvac BETA 1.0 Pilot 3 or newer (API 1.8); this EZvac has API "
+                    + api.apiVersion() + ".");
+            Bukkit.getPluginManager().disablePlugin(this);
+            return;
+        }
+
         // EZvac's API can't change anything yet; see ThermostatControl for where writes plug in.
         control = new ReadOnlyControl();
         FileConfiguration config = getConfig();
         links = new LinkManager(config.getLong("link.token-ttl-seconds", 300), config.getLong("session.ttl-hours", 72));
-        snapshots = new SnapshotService(this, api, control);
         accounts = new AccountStore(new File(getDataFolder(), "accounts.yml"), getLogger());
         accounts.load();
+        snapshots = new SnapshotService(this, api, control, accounts::allOwned);
         getServer().getPluginManager().registerEvents(new OwnershipListener(accounts), this);
 
         EZStatsCommand command = new EZStatsCommand(this, api, links, accounts);
@@ -72,13 +79,25 @@ public final class EZStatsPlugin extends JavaPlugin {
         startWeb();
     }
 
+    /** Whether an API version such as "1.11" is at least major.minor. */
+    private static boolean apiAtLeast(String version, int major, int minor) {
+        try {
+            String[] parts = version.split("\\.");
+            int have = Integer.parseInt(parts[0]);
+            int haveMinor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+            return have > major || (have == major && haveMinor >= minor);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     private void startWeb() {
         FileConfiguration config = getConfig();
         String bind = config.getString("web.bind", "0.0.0.0");
         int port = config.getInt("web.port", 8765);
         publicUrl = resolvePublicUrl(config.getString("web.public-url", ""), port);
 
-        snapshots.start(config.getInt("refresh-ticks", 20));
+        snapshots.start(config.getInt("refresh-ticks", 20), config.getInt("weather-refresh-ticks", 200));
         web = new WebServer(getLogger(), links, accounts, snapshots, control, publicUrl.startsWith("https://"),
                 config.getBoolean("web.trust-forwarded-for", false));
         try {

@@ -34,10 +34,15 @@
     <!-- Signed in -->
     <section id="linked" hidden>
       <div class="page-head">
-        <h1>Your thermostats</h1>
+        <div class="title-row">
+          <h1>Your thermostats</h1>
+          <button id="new-folder" type="button" class="small">New folder</button>
+        </div>
         <p id="readonly" class="note" hidden>Temperatures and power are read-only for now, because EZvac's API
-          can't change them yet. You can rename thermostats here.</p>
+          can't change them yet. You can rename thermostats and sort them into folders here.</p>
+        <div id="worlds" class="worlds"></div>
       </div>
+      <div id="folder-form" class="folder-form"></div>
 
       <div id="empty" class="empty" hidden>
         <h2>No thermostats yet</h2>

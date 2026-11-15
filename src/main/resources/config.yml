@@ -27,3 +27,7 @@ session:
 
 # How often the dashboard's numbers are read from EZvac, in ticks (20 = every second).
 refresh-ticks: 20
+
+# How often each thermostat's nearest weather station is read, in ticks (200 = every 10 seconds).
+# Weather changes slowly, so this can be much slower than refresh-ticks.
+weather-refresh-ticks: 200

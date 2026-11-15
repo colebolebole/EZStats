@@ -2,8 +2,9 @@
 
 A web dashboard for [EZvac](https://github.com/EZvac-Plugin/EZvac) thermostats. Players make a
 website account in game, claim the thermostats that are theirs, and sign in to see them live:
-room and target temperature, mode, humidity, running equipment, what needs attention, plus the
-season and outdoor weather of their worlds.
+room and target temperature, mode, humidity, running equipment and what needs attention. Each
+thermostat also shows the weather and seven-day forecast from its nearest weather station, and
+players can sort their thermostats into folders.
 
 **Read-only for now.** EZvac's public API (through 1.11) can only read; it has no call to set a
 target or switch a system on or off. EZStats is built so that changing thermostats from the
@@ -13,11 +14,11 @@ methods, changes are made in game and the dashboard says so.
 ## Requirements
 
 - Paper (or a fork) 1.21.x, Java 21
-- EZvac BETA 1.0 Pilot 2 or newer (API 1.7)
+- EZvac BETA 1.0 Pilot 3 or newer (API 1.8). EZStats says so and stays off on an older one.
 
 ## Install
 
-1. Put `EZStats-0.3.0.jar` in `plugins/` next to EZvac.
+1. Put `EZStats-0.4.0.jar` in `plugins/` next to EZvac.
 2. Start the server once, then edit `plugins/EZStats/config.yml`: set `web.public-url` to the
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
@@ -31,8 +32,35 @@ methods, changes are made in game and the dashboard says so.
 4. Give a thermostat a nickname: look at it and run **`/ezstats nick Living Room`**, or click the
    pencil next to its name on the website. Nicknames are saved with your account.
 
+5. Sort thermostats into folders on the website: click **New folder**, then use the **Folder** menu on
+   each thermostat's card.
+
 Don't reuse a password from anywhere else: commands you type can appear in the server's console
 and logs.
+
+## Weather and forecasts
+
+Each thermostat shows what its nearest weather station says: the sky, the temperature outside, today's
+high, low and chance of rain. **Forecast** opens the station's seven days with each day's sky, high and
+low, chances of rain and thunder, wind and direction, air quality and a note such as "Rain from 15:00",
+plus the station's wind and air right now.
+
+- **Nearest station:** found from the thermostat's own coordinates with EZvac's API
+  (`weatherStationsNear`), the same stations a player could see with `/hvac forecast`: working ones,
+  within about 400 blocks, nearest first. A thermostat with none in range says so.
+- **Building one:** weather stations are built by admins in the Overworld. See EZvac's
+  [Weather stations](https://github.com/EZvac-Plugin/EZvac/blob/main/docs/weather-stations.md).
+- **How often:** every `weather-refresh-ticks` (default 200, ten seconds), and only for thermostats
+  somebody owns.
+- Temperatures use the server's units (°F or °C), and wind shows in mph or km/h to match.
+
+## Folders
+
+Folders are yours alone, made on the website: **New folder** makes one, the pencil renames it, and
+**Delete** removes it (its thermostats aren't deleted, they go back to Unfiled). Each thermostat's
+**Folder** menu moves it. Names are up to 32 characters and unique among your folders, and you can have
+up to 20. They are saved in `accounts.yml`, and a thermostat leaves its folder when it is released or
+removed.
 
 ## Commands
 
@@ -87,5 +115,5 @@ whenever `writable()` is true. When EZvac's API can change thermostats, implemen
 mvn package
 ```
 
-The jar is `target/EZStats-0.3.0.jar`. EZvac's API comes from JitPack and is `provided`: never
+The jar is `target/EZStats-0.4.0.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.

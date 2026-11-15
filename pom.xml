@@ -6,7 +6,7 @@
 
     <groupId>com.ezstats</groupId>
     <artifactId>ezstats</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <packaging>jar</packaging>
     <name>EZStats</name>
     <description>A web dashboard for EZvac thermostats, linked from in game with /ezstats link.</description>
@@ -15,8 +15,9 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <paper.version>1.21.1-R0.1-SNAPSHOT</paper.version>
-        <!-- The oldest EZvac whose API has what EZStats reads (API 1.7: profile, mini, attention). -->
-        <ezvac.version>BETA-1.0-P2</ezvac.version>
+        <!-- The oldest EZvac whose API has what EZStats reads (API 1.8: a weather station's wind and air,
+             and each forecast day's AQI and wind direction). -->
+        <ezvac.version>BETA-1.0-P3</ezvac.version>
     </properties>
 
     <repositories>

@@ -1,10 +1,10 @@
 "use strict";
 
-// Everything that came from a player (a nickname, a thermostat's label, a world's name) is put on the
-// page with textContent, never as HTML.
+// Everything that came from a player (a nickname, a folder or station name, a thermostat's label) is put
+// on the page with textContent, never as HTML.
 
 const POLL_MS = 2000;
-const MAX_NICKNAME = 32;
+const MAX_NAME = 32;
 const $ = (id) => document.getElementById(id);
 
 const ATTENTION = {
@@ -15,12 +15,23 @@ const ATTENTION = {
   undersized: "Undersized",
 };
 const MODES = { cooling: "Cooling", heating: "Heating", idle: "Idle" };
+const SKY = { clear: "Clear", rain: "Rain", snow: "Snow", thunder: "Thunder" };
+const WIND = { calm: "Calm", breezy: "Breezy", windy: "Windy", gale: "Gale" };
+const BAND = {
+  good: "Good",
+  moderate: "Moderate",
+  unhealthy_for_sensitive_groups: "Unhealthy for sensitive groups",
+  unhealthy: "Unhealthy",
+  very_unhealthy: "Very unhealthy",
+  hazardous: "Hazardous",
+};
 
 let units = "F";
 let writable = false;
 let lastKey = "";
-let editing = false; // while a nickname is being typed the page is left alone
-let pending = null;  // the newest data that arrived meanwhile
+let data = null;               // what is on the page now
+let editing = false;           // while a name is being typed the page is left alone
+const forecastOpen = new Set(); // keys of the thermostats whose forecast is showing
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -31,6 +42,9 @@ function el(tag, className, text) {
 
 const show = (f) => (units === "C" ? (f - 32) * 5 / 9 : f);
 const fmt = (f) => (Number.isFinite(f) ? show(f).toFixed(1) : "–");
+const whole = (f) => (Number.isFinite(f) ? Math.round(show(f)) + "°" : "–");
+const speed = (ms) => (units === "C" ? Math.round(ms * 3.6) + " km/h" : Math.round(ms * 2.236936) + " mph");
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function toast(message) {
   const node = el("div", "toast", message);
@@ -50,6 +64,7 @@ async function post(path, body) {
     try { message = (await response.json()).error || message; } catch (_) { /* keep the default */ }
     throw new Error(message);
   }
+  try { return await response.json(); } catch (_) { return {}; }
 }
 
 function pencilIcon() {
@@ -68,58 +83,201 @@ function pencilIcon() {
   return svg;
 }
 
-// --- renaming ---------------------------------------------------------------------------------
+function iconButton(label, onClick) {
+  const button = el("button", "edit");
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.appendChild(pencilIcon());
+  button.addEventListener("click", onClick);
+  return button;
+}
 
-function startRename(t, titles) {
+// --- one inline text form, used to rename a thermostat or a folder and to make a folder -----------
+
+function endEditing() {
+  editing = false;
+  lastKey = "";
+  $("folder-form").replaceChildren();
+  refresh();
+}
+
+/**
+ * A small form with a text field. `save(value)` may throw to show its message under the field; when it
+ * returns, editing ends and the page reloads from the server.
+ */
+function inlineForm({ value, placeholder, label, submit, hint, save }) {
   editing = true;
   const form = el("form", "rename");
   const input = el("input");
   input.type = "text";
-  input.maxLength = MAX_NICKNAME;
-  input.value = t.nickname || "";
-  input.placeholder = t.label;
-  input.setAttribute("aria-label", "Nickname for " + t.label);
+  input.maxLength = MAX_NAME;
+  input.value = value;
+  input.placeholder = placeholder;
+  input.setAttribute("aria-label", label);
   const error = el("p", "error");
   error.hidden = true;
 
   const actions = el("div", "rename-actions");
-  const save = el("button", "small solid", "Save");
-  save.type = "submit";
+  const ok = el("button", "small solid", submit);
+  ok.type = "submit";
   const cancel = el("button", "small", "Cancel");
   cancel.type = "button";
-  actions.append(save, cancel);
-  form.append(input, actions, el("span", "rename-hint", "Leave it empty to use the sign's name."), error);
+  actions.append(ok, cancel);
+  form.append(input, actions);
+  if (hint) form.appendChild(el("span", "rename-hint", hint));
+  form.appendChild(error);
 
-  const finish = () => {
-    editing = false;
-    if (pending) { const data = pending; pending = null; lastKey = ""; render(data); }
-    else { lastKey = ""; refresh(); }
-  };
-  cancel.addEventListener("click", finish);
-  form.addEventListener("keydown", (event) => { if (event.key === "Escape") finish(); });
+  cancel.addEventListener("click", endEditing);
+  form.addEventListener("keydown", (event) => { if (event.key === "Escape") endEditing(); });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    save.disabled = true;
+    ok.disabled = true;
     error.hidden = true;
     try {
-      await post("/api/thermostat/nickname", { key: t.key, nickname: input.value });
-      pending = null;
-      finish();
+      await save(input.value);
+      endEditing();
     } catch (e) {
       error.textContent = e.message;
       error.hidden = false;
-      save.disabled = false;
+      ok.disabled = false;
     }
   });
+  setTimeout(() => { input.focus(); input.select(); }, 0);
+  return form;
+}
 
-  titles.replaceChildren(form);
-  input.focus();
-  input.select();
+function renameThermostat(t, titles) {
+  titles.replaceChildren(inlineForm({
+    value: t.nickname || "",
+    placeholder: t.label,
+    label: "Nickname for " + t.label,
+    submit: "Save",
+    hint: "Leave it empty to use the sign's name.",
+    save: (value) => post("/api/thermostat/nickname", { key: t.key, nickname: value }),
+  }));
+}
+
+function startNewFolder() {
+  if (editing) return;
+  $("folder-form").replaceChildren(inlineForm({
+    value: "",
+    placeholder: "Folder name",
+    label: "New folder name",
+    submit: "Create",
+    save: (value) => post("/api/folders", { name: value }),
+  }));
+}
+
+function renameFolder(folder, head) {
+  if (editing) return;
+  head.replaceChildren(inlineForm({
+    value: folder.name,
+    placeholder: folder.name,
+    label: "Rename folder " + folder.name,
+    submit: "Save",
+    save: (value) => post("/api/folders/rename", { id: folder.id, name: value }),
+  }));
+}
+
+async function deleteFolder(folder) {
+  if (!confirm(`Delete the folder "${folder.name}"? Its thermostats aren't deleted: they go back to Unfiled.`)) return;
+  try { await post("/api/folders/delete", { id: folder.id }); lastKey = ""; refresh(); }
+  catch (e) { toast(e.message); }
+}
+
+async function moveToFolder(t, folderId) {
+  try { await post("/api/thermostat/folder", { key: t.key, folder: folderId }); lastKey = ""; refresh(); }
+  catch (e) { toast(e.message); lastKey = ""; refresh(); }
+}
+
+// --- weather ----------------------------------------------------------------------------------
+
+function stationOf(t) {
+  return t.weather && data.state.stations ? data.state.stations[t.weather.station] : null;
+}
+
+function dayLabel(n) {
+  return n === 0 ? "Today" : n === 1 ? "Tomorrow" : `In ${n} days`;
+}
+
+/** "12 mph from the W, Breezy"; short: "W 12 mph". */
+function windText(w, short) {
+  if (short) return `${w.from ? w.from + " " : ""}${speed(w.speedMs)}`;
+  const parts = [`${speed(w.speedMs)}${w.from ? " from the " + w.from : ""}`];
+  if (w.level) parts.push(WIND[w.level] || w.level);
+  return parts.join(", ");
+}
+
+function weatherRow(t, node) {
+  const station = stationOf(t);
+  if (!station) {
+    node.appendChild(el("div", "wx none", "No weather station in range"));
+    return;
+  }
+  const today = station.forecast.find((d) => d.daysAhead === 0) || station.forecast[0];
+  const row = el("div", "wx");
+  const now = el("div", "wx-now");
+  if (today) now.appendChild(el("span", "sky sky-" + today.sky, SKY[today.sky] || today.sky));
+  now.appendChild(el("span", "wx-temp", `${whole(station.outdoorF)} outside`));
+  if (today) {
+    now.appendChild(el("span", "wx-range", `H ${whole(today.highF)}  L ${whole(today.lowF)}`));
+    if (today.rain > 0) now.appendChild(el("span", "wx-range", `${Math.round(today.rain * 100)}% rain`));
+  }
+  row.appendChild(now);
+
+  const open = forecastOpen.has(t.key);
+  const toggle = el("button", "link small-link", open ? "Hide forecast" : "Forecast");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", String(open));
+  toggle.addEventListener("click", () => {
+    if (forecastOpen.has(t.key)) forecastOpen.delete(t.key); else forecastOpen.add(t.key);
+    render(data);
+  });
+  row.appendChild(toggle);
+  node.appendChild(row);
+  if (open) node.appendChild(forecastPanel(t, station));
+}
+
+function forecastPanel(t, station) {
+  const panel = el("div", "forecast");
+  const head = el("div", "fc-head");
+  head.appendChild(el("b", "", station.label));
+  head.append(` · ${t.weather.distance} blocks away`);
+  panel.appendChild(head);
+
+  const bits = [];
+  if (station.wind) bits.push("Wind " + windText(station.wind));
+  if (station.air) bits.push(`Air ${station.air.aqi}, ${BAND[station.air.band] || station.air.band}`);
+  if (station.lightningStrikes > 0) bits.push(`${station.lightningStrikes} lightning strike${station.lightningStrikes === 1 ? "" : "s"}`);
+  if (bits.length) panel.appendChild(el("div", "fc-now", bits.join(" · ")));
+
+  if (!station.forecast.length) {
+    panel.appendChild(el("div", "fc-now", "This station isn't forecasting right now."));
+    return panel;
+  }
+  const list = el("ul", "fc-days");
+  for (const d of station.forecast) {
+    const li = el("li");
+    li.appendChild(el("span", "fc-day", dayLabel(d.daysAhead)));
+    li.appendChild(el("span", "sky sky-" + d.sky, SKY[d.sky] || d.sky));
+    li.appendChild(el("span", "fc-temps", `${whole(d.highF)} / ${whole(d.lowF)}`));
+    li.appendChild(el("span", "fc-rain", d.rain > 0 ? `${Math.round(d.rain * 100)}%` : "–"));
+    const extra = [];
+    if (d.note) extra.push(d.note);
+    if (d.thunder >= 0.05) extra.push(`${Math.round(d.thunder * 100)}% thunder`);
+    if (d.wind) extra.push(windText(d.wind, true));
+    if (d.aqi !== undefined) extra.push("AQI " + d.aqi);
+    if (extra.length) li.appendChild(el("span", "fc-note", extra.join(" · ")));
+    list.appendChild(li);
+  }
+  panel.appendChild(list);
+  return panel;
 }
 
 // --- cards ------------------------------------------------------------------------------------
 
-function card(t) {
+function card(t, folders) {
   const node = el("article", "card thermo " + (t.enabled ? t.mode : "off"));
   const title = t.nickname || t.label;
 
@@ -127,18 +285,12 @@ function card(t) {
   const titles = el("div", "titles");
   const row = el("div", "name-row");
   row.appendChild(el("h3", "name", title));
-  const edit = el("button", "edit");
-  edit.type = "button";
-  edit.title = "Rename";
-  edit.setAttribute("aria-label", "Rename " + title);
-  edit.appendChild(pencilIcon());
-  edit.addEventListener("click", () => startRename(t, titles));
-  row.appendChild(edit);
+  row.appendChild(iconButton("Rename " + title, () => { if (!editing) renameThermostat(t, titles); }));
   titles.appendChild(row);
 
   const where = [];
   if (t.nickname) where.push(t.label);
-  where.push(`${t.x}, ${t.y}, ${t.z}`);
+  where.push(`${t.world} ${t.x}, ${t.y}, ${t.z}`);
   if (t.pool) where.push("pool");
   if (t.mini) where.push("mini");
   titles.appendChild(el("div", "sub", where.join(" · ")));
@@ -179,7 +331,7 @@ function card(t) {
   };
   if (Number.isFinite(t.humidity)) stat("Humidity", Math.round(t.humidity) + "%");
   stat("Equipment", `${t.runningUnits}/${t.totalUnits} running`);
-  if (t.profile && t.profile !== "normal") stat("Profile", t.profile[0].toUpperCase() + t.profile.slice(1));
+  if (t.profile && t.profile !== "normal") stat("Profile", cap(t.profile));
   node.appendChild(stats);
 
   if (t.attention && t.attention.length) {
@@ -188,6 +340,21 @@ function card(t) {
     node.appendChild(chips);
   }
 
+  weatherRow(t, node);
+
+  const foot = el("div", "card-foot");
+  if (folders.length) {
+    const label = el("label", "folder-pick");
+    label.append("Folder ");
+    const select = el("select");
+    select.setAttribute("aria-label", "Folder for " + title);
+    select.appendChild(new Option("Unfiled", ""));
+    for (const f of folders) select.appendChild(new Option(f.name, f.id));
+    select.value = t.folder || "";
+    select.addEventListener("change", () => moveToFolder(t, select.value));
+    label.appendChild(select);
+    foot.appendChild(label);
+  }
   if (writable) {
     const power = el("button", "small", t.enabled ? "Switch off" : "Switch on");
     power.type = "button";
@@ -195,8 +362,9 @@ function card(t) {
       try { await post("/api/thermostat/enabled", { key: t.key, enabled: !t.enabled }); lastKey = ""; refresh(); }
       catch (e) { toast(e.message); }
     });
-    node.appendChild(power);
+    foot.appendChild(power);
   }
+  if (foot.childNodes.length) node.appendChild(foot);
   return node;
 }
 
@@ -217,8 +385,7 @@ async function step(t, delta) {
 function worldMeta(w) {
   const parts = [];
   if (w.season) {
-    const name = w.season.name[0].toUpperCase() + w.season.name.slice(1);
-    parts.push(`${name}, day ${w.season.day} of ${w.season.days}${w.season.paused ? " (paused)" : ""}`);
+    parts.push(`${cap(w.season.name)}, day ${w.season.day} of ${w.season.days}${w.season.paused ? " (paused)" : ""}`);
   }
   if (w.outdoor) {
     let outside = `${fmt(w.outdoor.airF)}°${units} outside`;
@@ -228,36 +395,71 @@ function worldMeta(w) {
   return parts.join(" · ");
 }
 
-function render(data) {
-  const state = data.state;
+function section(folder, list, folders) {
+  const group = el("section", "group");
+  const head = el("div", "group-head");
+  const titles = el("div", "group-title");
+  titles.appendChild(el("h2", "", folder ? folder.name : "Unfiled"));
+  titles.appendChild(el("span", "group-meta", String(list.length)));
+  head.appendChild(titles);
+  if (folder) {
+    const actions = el("div", "group-actions");
+    actions.appendChild(iconButton("Rename folder " + folder.name, () => renameFolder(folder, head)));
+    const del = el("button", "link small-link", "Delete");
+    del.type = "button";
+    del.addEventListener("click", () => deleteFolder(folder));
+    actions.appendChild(del);
+    head.appendChild(actions);
+  }
+  group.appendChild(head);
+
+  if (list.length === 0) {
+    group.appendChild(el("p", "folder-empty", "Nothing here yet. Use the Folder menu on a thermostat to move it in."));
+  } else {
+    const grid = el("div", "grid");
+    for (const t of list) grid.appendChild(card(t, folders));
+    group.appendChild(grid);
+  }
+  return group;
+}
+
+function render(d) {
+  data = d;
+  const state = d.state;
   units = state.units === "C" ? "C" : "F";
   writable = state.writable === true;
 
   $("unlinked").hidden = true;
   $("linked").hidden = false;
   $("who").hidden = false;
-  $("who-name").textContent = data.player;
+  $("who-name").textContent = d.player;
   $("readonly").hidden = writable;
 
+  const worlds = $("worlds");
+  worlds.replaceChildren();
+  for (const w of state.worlds) {
+    const meta = worldMeta(w);
+    const box = el("span", "world");
+    box.appendChild(el("b", "", w.name));
+    if (meta) box.append(" · " + meta);
+    worlds.appendChild(box);
+  }
+
+  const folders = state.folders || [];
   const groups = $("groups");
   groups.replaceChildren();
-  const worlds = new Map(state.worlds.map((w) => [w.name, w]));
-  const byWorld = new Map();
-  for (const t of state.thermostats) {
-    if (!byWorld.has(t.world)) byWorld.set(t.world, []);
-    byWorld.get(t.world).push(t);
-  }
-  for (const [name, list] of byWorld) {
-    const group = el("section", "group");
-    const head = el("div", "group-head");
-    head.appendChild(el("h2", "", name));
-    const meta = worlds.has(name) ? worldMeta(worlds.get(name)) : "";
-    if (meta) head.appendChild(el("span", "group-meta", meta));
-    group.appendChild(head);
-    const grid = el("div", "grid");
-    for (const t of list) grid.appendChild(card(t));
-    group.appendChild(grid);
-    groups.appendChild(group);
+  if (folders.length === 0) {
+    if (state.thermostats.length) {
+      const grid = el("div", "grid");
+      for (const t of state.thermostats) grid.appendChild(card(t, folders));
+      groups.appendChild(grid);
+    }
+  } else {
+    const byFolder = new Map(folders.map((f) => [f.id, []]));
+    const unfiled = [];
+    for (const t of state.thermostats) (byFolder.get(t.folder) || unfiled).push(t);
+    for (const f of folders) groups.appendChild(section(f, byFolder.get(f.id), folders));
+    if (unfiled.length) groups.appendChild(section(null, unfiled, folders));
   }
   $("empty").hidden = state.thermostats.length > 0;
   stamp(state);
@@ -279,16 +481,19 @@ async function refresh() {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (response.status === 401) return renderUnlinked();
     if (!response.ok) throw new Error("HTTP " + response.status);
-    const data = await response.json();
-    if (editing) { pending = data; return; }
+    const d = await response.json();
+    if (editing) return;
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
-    const key = JSON.stringify(data.state.thermostats) + JSON.stringify(data.state.worlds) + data.player;
-    if (key !== lastKey) { lastKey = key; render(data); }
-    else stamp(data.state);
+    const s = d.state;
+    const key = JSON.stringify([s.thermostats, s.worlds, s.folders, s.stations, d.player]);
+    if (key !== lastKey) { lastKey = key; render(d); }
+    else stamp(s);
   } catch (e) {
     $("foot").textContent = "Can't reach the server. Trying again…";
   }
 }
+
+$("new-folder").addEventListener("click", startNewFolder);
 
 $("login").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -311,7 +516,7 @@ $("login").addEventListener("submit", async (event) => {
 $("logout").addEventListener("click", async () => {
   try { await post("/api/logout", {}); } catch (_) { /* signed out or not, show the sign-in page */ }
   editing = false;
-  pending = null;
+  data = null;
   renderUnlinked();
 });
 

@@ -31,12 +31,32 @@ public final class AccountStore {
         final Set<String> owned = new LinkedHashSet<>();
         /** A thermostat's key to the nickname its owner gave it. Only owned thermostats have one. */
         final Map<String, String> nicknames = new LinkedHashMap<>();
+        /** The account's folders, in the order they were made. */
+        final List<Folder> folders = new ArrayList<>();
+        /** A thermostat's key to the id of the folder it is in. A thermostat in no folder has no entry. */
+        final Map<String, String> folderOf = new LinkedHashMap<>();
     }
 
     /** What {@link #own} did. {@code owner} is who has it when {@code TAKEN}. */
     public record OwnResult(Status status, String owner) {
         public enum Status { CLAIMED, ALREADY_YOURS, TAKEN }
     }
+
+    public static final int MAX_FOLDERS = 20;
+
+    /** A folder a player keeps their thermostats in. The id is what the website uses. */
+    public record Folder(String id, String name) {}
+
+    /** One owned thermostat as its owner sees it: its nickname ("" for none) and folder id ("" for none). */
+    public record Item(String key, String nickname, String folder) {}
+
+    /** Everything the website needs of an account: the thermostats in claim order, and the folders. */
+    public record View(List<Item> thermostats, List<Folder> folders) {}
+
+    public enum FolderStatus { OK, LIMIT, DUPLICATE, NOT_FOUND, NOT_OWNED }
+
+    /** What a folder change did. {@code id} is the folder the change made or touched. */
+    public record FolderChange(FolderStatus status, String id) {}
 
     private final File file;
     private final Logger log;
@@ -66,6 +86,21 @@ public final class AccountStore {
                     Object value = nickname.get("name");
                     if (key != null && value != null && account.owned.contains(key.toString())) {
                         account.nicknames.put(key.toString(), value.toString());
+                    }
+                }
+                for (Map<?, ?> folder : entry.getMapList("folders")) {
+                    Object folderId = folder.get("id");
+                    Object folderName = folder.get("name");
+                    if (folderId != null && folderName != null) {
+                        account.folders.add(new Folder(folderId.toString(), folderName.toString()));
+                    }
+                }
+                for (Map<?, ?> placed : entry.getMapList("folder-of")) {
+                    Object key = placed.get("key");
+                    Object folderId = placed.get("folder");
+                    if (key != null && folderId != null && account.owned.contains(key.toString())
+                            && hasFolder(account, folderId.toString())) {
+                        account.folderOf.put(key.toString(), folderId.toString());
                     }
                 }
                 accounts.put(UUID.fromString(id), account);
@@ -140,9 +175,66 @@ public final class AccountStore {
         for (Account account : accounts.values()) {
             changed |= account.owned.remove(key);
             account.nicknames.remove(key);
+            account.folderOf.remove(key);
         }
         if (changed) save();
         return changed;
+    }
+
+    // --- folders --------------------------------------------------------------------------
+
+    /** Makes a folder. {@code playerName} is for an account that doesn't exist yet. */
+    public synchronized FolderChange createFolder(UUID player, String playerName, String name) {
+        Account account = account(player, playerName);
+        if (account.folders.size() >= MAX_FOLDERS) return new FolderChange(FolderStatus.LIMIT, "");
+        if (nameTaken(account, name, null)) return new FolderChange(FolderStatus.DUPLICATE, "");
+        Folder folder = new Folder(UUID.randomUUID().toString().substring(0, 8), name);
+        account.folders.add(folder);
+        save();
+        return new FolderChange(FolderStatus.OK, folder.id());
+    }
+
+    public synchronized FolderStatus renameFolder(UUID player, String id, String name) {
+        Account account = accounts.get(player);
+        if (account == null || !hasFolder(account, id)) return FolderStatus.NOT_FOUND;
+        if (nameTaken(account, name, id)) return FolderStatus.DUPLICATE;
+        account.folders.replaceAll(folder -> folder.id().equals(id) ? new Folder(id, name) : folder);
+        save();
+        return FolderStatus.OK;
+    }
+
+    /** Deletes a folder. Its thermostats aren't deleted: they go back to being in no folder. */
+    public synchronized FolderStatus deleteFolder(UUID player, String id) {
+        Account account = accounts.get(player);
+        if (account == null || !hasFolder(account, id)) return FolderStatus.NOT_FOUND;
+        account.folders.removeIf(folder -> folder.id().equals(id));
+        account.folderOf.values().removeIf(id::equals);
+        save();
+        return FolderStatus.OK;
+    }
+
+    /** Puts an owned thermostat in a folder, or in none when {@code folderId} is empty. */
+    public synchronized FolderStatus setFolder(UUID player, String key, String folderId) {
+        Account account = accounts.get(player);
+        if (account == null || !account.owned.contains(key)) return FolderStatus.NOT_OWNED;
+        if (folderId.isEmpty()) {
+            account.folderOf.remove(key);
+        } else {
+            if (!hasFolder(account, folderId)) return FolderStatus.NOT_FOUND;
+            account.folderOf.put(key, folderId);
+        }
+        save();
+        return FolderStatus.OK;
+    }
+
+    private static boolean hasFolder(Account account, String id) {
+        return account.folders.stream().anyMatch(folder -> folder.id().equals(id));
+    }
+
+    /** Folder names are unique per account, ignoring case. {@code exceptId} is the folder being renamed. */
+    private static boolean nameTaken(Account account, String name, String exceptId) {
+        return account.folders.stream()
+                .anyMatch(folder -> !folder.id().equals(exceptId) && folder.name().equalsIgnoreCase(name));
     }
 
     /**
@@ -158,17 +250,22 @@ public final class AccountStore {
         return true;
     }
 
-    public synchronized String nickname(UUID player, String key) {
+    /** What the website shows a player: their thermostats in the order they claimed them, and their folders. */
+    public synchronized View view(UUID player) {
         Account account = accounts.get(player);
-        return account == null ? "" : account.nicknames.getOrDefault(key, "");
+        if (account == null) return new View(List.of(), List.of());
+        List<Item> items = new ArrayList<>();
+        for (String key : account.owned) {
+            items.add(new Item(key, account.nicknames.getOrDefault(key, ""), account.folderOf.getOrDefault(key, "")));
+        }
+        return new View(items, List.copyOf(account.folders));
     }
 
-    /** The thermostats a player owns in the order they claimed them, each with its nickname or "". */
-    public synchronized Map<String, String> ownedWithNicknames(UUID player) {
-        Map<String, String> out = new LinkedHashMap<>();
-        Account account = accounts.get(player);
-        if (account != null) for (String key : account.owned) out.put(key, account.nicknames.getOrDefault(key, ""));
-        return out;
+    /** Every thermostat anyone owns: the weather is only read for these. */
+    public synchronized Set<String> allOwned() {
+        Set<String> all = new LinkedHashSet<>();
+        for (Account account : accounts.values()) all.addAll(account.owned);
+        return all;
     }
 
     public synchronized Set<String> owned(UUID player) {
@@ -197,6 +294,14 @@ public final class AccountStore {
                 nicknames.add(Map.of("key", nickname.getKey(), "name", nickname.getValue()));
             }
             if (!nicknames.isEmpty()) yaml.set(base + ".nicknames", nicknames);
+            List<Map<String, String>> folders = new ArrayList<>();
+            for (Folder folder : account.folders) folders.add(Map.of("id", folder.id(), "name", folder.name()));
+            if (!folders.isEmpty()) yaml.set(base + ".folders", folders);
+            List<Map<String, String>> placed = new ArrayList<>();
+            for (Map.Entry<String, String> in : account.folderOf.entrySet()) {
+                placed.add(Map.of("key", in.getKey(), "folder", in.getValue()));
+            }
+            if (!placed.isEmpty()) yaml.set(base + ".folder-of", placed);
         }
         try {
             File parent = file.getParentFile();
