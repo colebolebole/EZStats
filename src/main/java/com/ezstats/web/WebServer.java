@@ -4,7 +4,7 @@ import com.ezstats.account.AccountStore;
 import com.ezstats.account.LoginLimiter;
 import com.ezstats.account.Nicknames;
 import com.ezstats.account.PasswordHasher;
-import com.ezstats.control.ThermostatControl;
+import com.ezstats.control.DeviceControl;
 import com.ezstats.link.LinkManager;
 import com.ezstats.snapshot.SnapshotService;
 import com.google.gson.Gson;
@@ -31,8 +31,9 @@ import java.util.logging.Logger;
  * <ul>
  *   <li>{@code GET /link?token=} spends a link token, sets the session cookie and goes to {@code /}</li>
  *   <li>{@code POST /api/login} a Minecraft name and the password from {@code /ezstats register}</li>
- *   <li>{@code GET /api/state} the thermostats the signed-in player owns</li>
- *   <li>{@code POST /api/thermostat/target} and {@code /enabled}, through the {@link ThermostatControl}</li>
+ *   <li>{@code GET /api/state} the devices the signed-in player owns</li>
+ *   <li>{@code POST /api/device/control} changes a device, through the {@link DeviceControl}</li>
+ *   <li>{@code POST /api/device/nickname}, {@code /api/device/home} and {@code /api/homes...} are the owner's own data</li>
  *   <li>{@code POST /api/logout}</li>
  * </ul>
  */
@@ -46,7 +47,9 @@ public final class WebServer {
             "/", new String[]{"web/index.html", "text/html; charset=utf-8"},
             "/index.html", new String[]{"web/index.html", "text/html; charset=utf-8"},
             "/app.js", new String[]{"web/app.js", "text/javascript; charset=utf-8"},
-            "/app.css", new String[]{"web/app.css", "text/css; charset=utf-8"});
+            "/app.css", new String[]{"web/app.css", "text/css; charset=utf-8"},
+            "/dial.js", new String[]{"web/dial.js", "text/javascript; charset=utf-8"},
+            "/devices.js", new String[]{"web/devices.js", "text/javascript; charset=utf-8"});
 
     private static final int MAX_USERNAME = 32;
     private static final int MAX_PASSWORD = 128;
@@ -58,7 +61,7 @@ public final class WebServer {
     private final AccountStore accounts;
     private final LoginLimiter limiter = new LoginLimiter();
     private final SnapshotService snapshots;
-    private final ThermostatControl control;
+    private final DeviceControl control;
     private final boolean secureCookie;
     private final boolean trustForwardedFor;
     private final boolean weatherTab;
@@ -68,7 +71,7 @@ public final class WebServer {
     private ExecutorService executor;
 
     public WebServer(Logger log, LinkManager links, AccountStore accounts, SnapshotService snapshots,
-                     ThermostatControl control, boolean secureCookie, boolean trustForwardedFor,
+                     DeviceControl control, boolean secureCookie, boolean trustForwardedFor,
                      boolean weatherTab) {
         this.log = log;
         this.links = links;
@@ -120,22 +123,18 @@ public final class WebServer {
                 state(exchange);
             } else if (method.equals("GET") && path.equals("/api/weather")) {
                 weather(exchange);
-            } else if (method.equals("POST") && path.equals("/api/thermostat/target")) {
-                change(exchange, Change.TARGET);
-            } else if (method.equals("POST") && path.equals("/api/thermostat/enabled")) {
-                change(exchange, Change.ENABLED);
-            } else if (method.equals("POST") && path.equals("/api/thermostat/profile")) {
-                change(exchange, Change.PROFILE);
-            } else if (method.equals("POST") && path.equals("/api/thermostat/nickname")) {
+            } else if (method.equals("POST") && path.equals("/api/device/control")) {
+                deviceControl(exchange);
+            } else if (method.equals("POST") && path.equals("/api/device/nickname")) {
                 nickname(exchange);
-            } else if (method.equals("POST") && path.equals("/api/thermostat/folder")) {
-                thermostatFolder(exchange);
-            } else if (method.equals("POST") && path.equals("/api/folders")) {
-                folderCreate(exchange);
-            } else if (method.equals("POST") && path.equals("/api/folders/rename")) {
-                folderRename(exchange);
-            } else if (method.equals("POST") && path.equals("/api/folders/delete")) {
-                folderDelete(exchange);
+            } else if (method.equals("POST") && path.equals("/api/device/home")) {
+                deviceHome(exchange);
+            } else if (method.equals("POST") && path.equals("/api/homes")) {
+                homeCreate(exchange);
+            } else if (method.equals("POST") && path.equals("/api/homes/rename")) {
+                homeRename(exchange);
+            } else if (method.equals("POST") && path.equals("/api/homes/delete")) {
+                homeDelete(exchange);
             } else if (method.equals("POST") && path.equals("/api/login")) {
                 login(exchange);
             } else if (method.equals("POST") && path.equals("/api/logout")) {
@@ -290,51 +289,75 @@ public final class WebServer {
         send(exchange, 200, "application/json; charset=utf-8", snapshots.weatherJson().getBytes(StandardCharsets.UTF_8));
     }
 
-    private enum Change { TARGET, ENABLED, PROFILE }
-
     /**
-     * Changes a thermostat through the {@link ThermostatControl}: its target, power or profile. Only its
-     * owner may, whatever the control behind this can do.
+     * {@code POST /api/device/control {key, action, value}}: changes a device through the
+     * {@link DeviceControl}. Only its owner may, whatever the control behind this can do. The action is one of
+     * {@code target}, {@code enabled}, {@code profile} (a thermostat); {@code powered}, {@code setpoint},
+     * {@code fridge-setpoint}, {@code fan}, {@code defrost}, {@code auto-defrost} (a humidifier, purifier,
+     * fridge or freezer); {@code equipment-enabled} (a heat pump, AC, furnace or boiler). A device that can't do
+     * what is asked answers with EZvac's own message.
      */
-    private void change(HttpExchange exchange, Change kind) throws IOException {
+    private void deviceControl(HttpExchange exchange) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
         UUID player = call.session().player();
-        String key = text(call.body(), "key");
-        if (key == null) {
+        JsonObject body = call.body();
+        String key = text(body, "key");
+        String action = text(body, "action");
+        if (key == null || action == null) {
             json(exchange, 400, error("Bad request"));
             return;
         }
         if (!accounts.ownerOf(key).equals(Optional.of(player))) {
-            json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+            json(exchange, 403, error("That device isn't yours. Claim it in game with /ezstats own."));
             return;
         }
 
-        ThermostatControl.Result result;
-        switch (kind) {
-            case TARGET -> {
-                Double target = number(call.body(), "targetF");
-                if (target == null || !Double.isFinite(target)) {
+        DeviceControl.Result result;
+        switch (action) {
+            case "target" -> {
+                Double value = number(body, "value");
+                if (value == null || !Double.isFinite(value)) {
                     json(exchange, 400, error("Bad request"));
                     return;
                 }
-                result = control.setTarget(player, key, target);
+                result = control.setTarget(player, key, value);
             }
-            case ENABLED -> {
-                Boolean enabled = flag(call.body(), "enabled");
-                if (enabled == null) {
+            case "setpoint", "fridge-setpoint" -> {
+                Integer value = whole(number(body, "value"));
+                if (value == null) {
                     json(exchange, 400, error("Bad request"));
                     return;
                 }
-                result = control.setEnabled(player, key, enabled);
+                result = action.equals("setpoint") ? control.setSetpoint(player, key, value)
+                        : control.setFridgeSetpoint(player, key, value);
             }
+            case "profile", "fan" -> {
+                String value = text(body, "value");
+                if (value == null) {
+                    json(exchange, 400, error("Bad request"));
+                    return;
+                }
+                result = action.equals("profile") ? control.setProfile(player, key, value)
+                        : control.setFan(player, key, value);
+            }
+            case "enabled", "powered", "auto-defrost", "equipment-enabled" -> {
+                Boolean value = flag(body, "value");
+                if (value == null) {
+                    json(exchange, 400, error("Bad request"));
+                    return;
+                }
+                result = switch (action) {
+                    case "enabled" -> control.setEnabled(player, key, value);
+                    case "powered" -> control.setPowered(player, key, value);
+                    case "auto-defrost" -> control.setAutoDefrost(player, key, value);
+                    default -> control.setEquipmentEnabled(player, key, value);
+                };
+            }
+            case "defrost" -> result = control.startDefrost(player, key);
             default -> {
-                String profile = text(call.body(), "profile");
-                if (profile == null) {
-                    json(exchange, 400, error("Bad request"));
-                    return;
-                }
-                result = control.setProfile(player, key, profile);
+                json(exchange, 400, error("Unknown action"));
+                return;
             }
         }
         if (result.ok()) {
@@ -346,6 +369,11 @@ public final class WebServer {
         }
     }
 
+    /** A whole number from a JSON number, or null when it isn't one or is absurd. */
+    private static Integer whole(Double value) {
+        if (value == null || !Double.isFinite(value) || value != Math.rint(value) || Math.abs(value) > 10_000) return null;
+        return (int) Math.rint(value);
+    }
     /** A number field of a body, or null when it is missing or not a number. */
     private static Double number(JsonObject body, String field) {
         try {
@@ -365,7 +393,7 @@ public final class WebServer {
     }
 
     /**
-     * Sets or clears the signed-in owner's nickname for a thermostat. This is EZStats' own data,
+     * Sets or clears the signed-in owner's nickname for a device. This is EZStats' own data,
      * not EZvac's, so it works even while EZvac's API is read-only.
      */
     private void nickname(HttpExchange exchange) throws IOException {
@@ -384,44 +412,44 @@ public final class WebServer {
             return;
         }
         if (!accounts.setNickname(call.session().player(), key, nickname)) {
-            json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+            json(exchange, 403, error("That device isn't yours. Claim it in game with /ezstats own."));
             return;
         }
         json(exchange, 200, "{\"ok\":true}");
     }
 
-    // --- folders: EZStats' own data, so they work while EZvac's API is read-only -----------------
+    // --- homes: EZStats' own data, so they work while EZvac's API is read-only -----------------
 
-    /** {@code POST /api/folders {name}} makes a folder and answers with its id. */
-    private void folderCreate(HttpExchange exchange) throws IOException {
+    /** {@code POST /api/homes {name}} makes a home and answers with its id. */
+    private void homeCreate(HttpExchange exchange) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
-        String name = folderName(exchange, call);
+        String name = homeName(exchange, call);
         if (name == null) return;
-        AccountStore.FolderChange change = accounts.createFolder(call.session().player(), call.session().name(), name);
-        if (change.status() != AccountStore.FolderStatus.OK) {
-            folderError(exchange, change.status());
+        AccountStore.HomeChange change = accounts.createHome(call.session().player(), call.session().name(), name);
+        if (change.status() != AccountStore.HomeStatus.OK) {
+            homeError(exchange, change.status());
             return;
         }
         json(exchange, 200, "{\"ok\":true,\"id\":" + GSON.toJson(change.id()) + "}");
     }
 
-    /** {@code POST /api/folders/rename {id, name}}. */
-    private void folderRename(HttpExchange exchange) throws IOException {
+    /** {@code POST /api/homes/rename {id, name}}. */
+    private void homeRename(HttpExchange exchange) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
         String id = text(call.body(), "id");
-        String name = id == null ? null : folderName(exchange, call);
+        String name = id == null ? null : homeName(exchange, call);
         if (id == null) {
             json(exchange, 400, error("Bad request"));
             return;
         }
         if (name == null) return;
-        folderResult(exchange, accounts.renameFolder(call.session().player(), id, name));
+        homeResult(exchange, accounts.renameHome(call.session().player(), id, name));
     }
 
-    /** {@code POST /api/folders/delete {id}}: its thermostats go back to being in no folder. */
-    private void folderDelete(HttpExchange exchange) throws IOException {
+    /** {@code POST /api/homes/delete {id}}: its devices go back to being in no home. */
+    private void homeDelete(HttpExchange exchange) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
         String id = text(call.body(), "id");
@@ -429,45 +457,45 @@ public final class WebServer {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        folderResult(exchange, accounts.deleteFolder(call.session().player(), id));
+        homeResult(exchange, accounts.deleteHome(call.session().player(), id));
     }
 
-    /** {@code POST /api/thermostat/folder {key, folder}}: "" for no folder. */
-    private void thermostatFolder(HttpExchange exchange) throws IOException {
+    /** {@code POST /api/device/home {key, home}}: "" for no home. */
+    private void deviceHome(HttpExchange exchange) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
         String key = text(call.body(), "key");
-        String folder = text(call.body(), "folder");
-        if (key == null || folder == null) {
+        String home = text(call.body(), "home");
+        if (key == null || home == null) {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        folderResult(exchange, accounts.setFolder(call.session().player(), key, folder));
+        homeResult(exchange, accounts.setHome(call.session().player(), key, home));
     }
 
-    /** A folder's name from the body's "name", tidied. Answers the client and returns null if it isn't allowed. */
-    private String folderName(HttpExchange exchange, Call call) throws IOException {
+    /** A home's name from the body's "name", tidied. Answers the client and returns null if it isn't allowed. */
+    private String homeName(HttpExchange exchange, Call call) throws IOException {
         String raw = text(call.body(), "name");
         String name = raw == null ? null : Nicknames.clean(raw);
         if (name == null || name.isEmpty()) {
-            json(exchange, 400, error("A folder's name is 1 to " + Nicknames.MAX_LENGTH
+            json(exchange, 400, error("A home's name is 1 to " + Nicknames.MAX_LENGTH
                     + " characters, with no control characters."));
             return null;
         }
         return name;
     }
 
-    private void folderResult(HttpExchange exchange, AccountStore.FolderStatus status) throws IOException {
-        if (status == AccountStore.FolderStatus.OK) json(exchange, 200, "{\"ok\":true}");
-        else folderError(exchange, status);
+    private void homeResult(HttpExchange exchange, AccountStore.HomeStatus status) throws IOException {
+        if (status == AccountStore.HomeStatus.OK) json(exchange, 200, "{\"ok\":true}");
+        else homeError(exchange, status);
     }
 
-    private void folderError(HttpExchange exchange, AccountStore.FolderStatus status) throws IOException {
+    private void homeError(HttpExchange exchange, AccountStore.HomeStatus status) throws IOException {
         switch (status) {
-            case LIMIT -> json(exchange, 409, error("You can have up to " + AccountStore.MAX_FOLDERS + " folders."));
-            case DUPLICATE -> json(exchange, 409, error("You already have a folder with that name."));
-            case NOT_FOUND -> json(exchange, 404, error("No such folder."));
-            default -> json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+            case LIMIT -> json(exchange, 409, error("You can have up to " + AccountStore.MAX_HOMES + " homes."));
+            case DUPLICATE -> json(exchange, 409, error("You already have a home with that name."));
+            case NOT_FOUND -> json(exchange, 404, error("No such home."));
+            default -> json(exchange, 403, error("That device isn't yours. Claim it in game with /ezstats own."));
         }
     }
 

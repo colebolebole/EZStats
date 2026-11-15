@@ -1,5 +1,6 @@
 package com.ezstats.control;
 
+import com.github.blade.hvac.api.ClimateUnitView;
 import com.github.blade.hvac.api.Position;
 import com.github.blade.hvac.api.ThermostatView;
 import com.github.blade.hvac.api.control.ControlResult;
@@ -11,9 +12,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 /**
- * Changes thermostats through EZvac's control API (1.12, EZvac BETA 1.0 Pilot 7). Each call names the
+ * Changes devices through EZvac's control API (1.12, EZvac BETA 1.0 Pilot 7). Each call names the
  * player it acts for, which EZvac records ("Last changed by" in {@code /hvac info}) and passes to a
  * cancellable {@code DeviceControlEvent}, so a claims plugin can still refuse a change. EZvac itself
  * checks nothing: who may change what is decided by the web layer, which only lets an owner through.
@@ -21,12 +23,13 @@ import java.util.concurrent.TimeoutException;
  * <p>Keep this class away from servers with an older EZvac: its types don't exist there. The plugin
  * only loads it after checking the API version.
  */
-public final class EzvacThermostatControl implements ThermostatControl {
+public final class EzvacDeviceControl implements DeviceControl {
     private static final long TIMEOUT_SECONDS = 5;
+    private static final Result BAD_REQUEST = Result.failure(400, "Bad request");
 
     private final EzvacControl control;
 
-    public EzvacThermostatControl(EzvacControl control) {
+    public EzvacDeviceControl(EzvacControl control) {
         this.control = control;
     }
 
@@ -35,31 +38,76 @@ public final class EzvacThermostatControl implements ThermostatControl {
         return true;
     }
 
+    /** Runs a call for {@code actor} on the device named by {@code key}, and waits for the answer. */
+    private Result call(UUID actor, String key, Function<Call, CompletableFuture<ControlResult>> change) {
+        Position position = position(key);
+        if (position == null) return BAD_REQUEST;
+        return await(change.apply(new Call(control.as(actor), position)));
+    }
+
+    private record Call(EzvacControl control, Position position) {}
+
     @Override
     public Result setTarget(UUID actor, String key, double targetF) {
-        Position position = position(key);
-        if (position == null || !Double.isFinite(targetF)) return Result.failure(400, "Bad request");
-        return await(control.as(actor).setTarget(position, targetF));
+        if (!Double.isFinite(targetF)) return BAD_REQUEST;
+        return call(actor, key, c -> c.control().setTarget(c.position(), targetF));
     }
 
     @Override
     public Result setEnabled(UUID actor, String key, boolean enabled) {
-        Position position = position(key);
-        if (position == null) return Result.failure(400, "Bad request");
-        return await(control.as(actor).setEnabled(position, enabled));
+        return call(actor, key, c -> c.control().setEnabled(c.position(), enabled));
     }
 
     @Override
     public Result setProfile(UUID actor, String key, String profile) {
-        Position position = position(key);
-        if (position == null) return Result.failure(400, "Bad request");
-        ThermostatView.Profile wanted;
+        ThermostatView.Profile wanted = parse(ThermostatView.Profile.class, profile);
+        if (wanted == null) return BAD_REQUEST;
+        return call(actor, key, c -> c.control().setProfile(c.position(), wanted));
+    }
+
+    @Override
+    public Result setPowered(UUID actor, String key, boolean powered) {
+        return call(actor, key, c -> c.control().setPowered(c.position(), powered));
+    }
+
+    @Override
+    public Result setSetpoint(UUID actor, String key, int setpoint) {
+        return call(actor, key, c -> c.control().setSetpoint(c.position(), setpoint));
+    }
+
+    @Override
+    public Result setFridgeSetpoint(UUID actor, String key, int setpointF) {
+        return call(actor, key, c -> c.control().setFridgeSetpoint(c.position(), setpointF));
+    }
+
+    @Override
+    public Result setFan(UUID actor, String key, String fan) {
+        ClimateUnitView.Fan wanted = parse(ClimateUnitView.Fan.class, fan);
+        if (wanted == null) return BAD_REQUEST;
+        return call(actor, key, c -> c.control().setFan(c.position(), wanted));
+    }
+
+    @Override
+    public Result startDefrost(UUID actor, String key) {
+        return call(actor, key, c -> c.control().startDefrost(c.position()));
+    }
+
+    @Override
+    public Result setAutoDefrost(UUID actor, String key, boolean on) {
+        return call(actor, key, c -> c.control().setAutoDefrost(c.position(), on));
+    }
+
+    @Override
+    public Result setEquipmentEnabled(UUID actor, String key, boolean enabled) {
+        return call(actor, key, c -> c.control().setEquipmentEnabled(c.position(), enabled));
+    }
+
+    private static <E extends Enum<E>> E parse(Class<E> type, String name) {
         try {
-            wanted = ThermostatView.Profile.valueOf(profile.toUpperCase(Locale.ROOT));
+            return Enum.valueOf(type, name.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            return Result.failure(400, "Bad request");
+            return null;
         }
-        return await(control.as(actor).setProfile(position, wanted));
     }
 
     /** Waits for the main thread to make the change. Web threads wait; the main thread never calls this. */
@@ -88,7 +136,7 @@ public final class EzvacThermostatControl implements ThermostatControl {
         };
     }
 
-    /** A thermostat's key ("world-uuid:x:y:z", see SnapshotService.key) as a position, or null if it isn't one. */
+    /** A device's key ("world-uuid:x:y:z", see SnapshotService.key) as a position, or null if it isn't one. */
     public static Position position(String key) {
         String[] parts = key.split(":");
         if (parts.length != 4) return null;

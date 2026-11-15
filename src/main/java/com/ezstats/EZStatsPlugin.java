@@ -3,7 +3,7 @@ package com.ezstats;
 import com.ezstats.account.AccountStore;
 import com.ezstats.account.OwnershipListener;
 import com.ezstats.control.Controls;
-import com.ezstats.control.ThermostatControl;
+import com.ezstats.control.DeviceControl;
 import com.ezstats.link.LinkManager;
 import com.ezstats.snapshot.SnapshotService;
 import com.ezstats.web.WebServer;
@@ -17,7 +17,7 @@ import java.io.File;
 import java.io.IOException;
 
 public final class EZStatsPlugin extends JavaPlugin {
-    private ThermostatControl control;
+    private DeviceControl control;
     private AccountStore accounts;
     private LinkManager links;
     private SnapshotService snapshots;
@@ -45,7 +45,7 @@ public final class EZStatsPlugin extends JavaPlugin {
         }
 
         FileConfiguration config = getConfig();
-        // Controlling thermostats needs API 1.12; set once at start, so changing control.enabled needs a restart.
+        // Controlling devices needs API 1.12; set once at start, so changing control.enabled needs a restart.
         control = Controls.create(this, api, config.getBoolean("control.enabled", true),
                 apiAtLeast(api.apiVersion(), 1, 12));
         links = new LinkManager(config.getLong("link.token-ttl-seconds", 300), config.getLong("session.ttl-hours", 72));
@@ -137,7 +137,7 @@ public final class EZStatsPlugin extends JavaPlugin {
         return web != null;
     }
 
-    public ThermostatControl control() {
+    public DeviceControl control() {
         return control;
     }
 }

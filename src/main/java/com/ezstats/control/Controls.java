@@ -14,19 +14,19 @@ public final class Controls {
      * @param enabled      the server's {@code control.enabled} setting
      * @param apiSupports  whether EZvac's API is 1.12 (BETA 1.0 Pilot 7) or newer
      */
-    public static ThermostatControl create(Plugin plugin, EzvacApi api, boolean enabled, boolean apiSupports) {
+    public static DeviceControl create(Plugin plugin, EzvacApi api, boolean enabled, boolean apiSupports) {
         if (!enabled) {
-            return new ReadOnlyControl("Changing thermostats from the website is switched off on this server.");
+            return new ReadOnlyControl("Changing devices from the website is switched off on this server.");
         }
         if (!apiSupports) {
-            return new ReadOnlyControl("This server's EZvac is too old for the website to change thermostats: "
+            return new ReadOnlyControl("This server's EZvac is too old for the website to change devices: "
                     + "it needs BETA 1.0 Pilot 7 or newer.");
         }
         try {
-            return new EzvacThermostatControl(api.control(plugin));
+            return new EzvacDeviceControl(api.control(plugin));
         } catch (UnsupportedOperationException | LinkageError e) {
             return new ReadOnlyControl("EZvac didn't give EZStats a controller, so the website can't change "
-                    + "thermostats.");
+                    + "devices.");
         }
     }
 }

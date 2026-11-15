@@ -139,6 +139,92 @@ input {
 .error { color: var(--danger); font-size: 0.88rem; margin-top: 0.4rem; }
 .hint { color: var(--muted); font-size: 0.84rem; margin-top: 1rem; }
 
+/* The thermostat dial, drawn like a Nest */
+.dial {
+  position: relative;
+  width: min(15.5rem, 100%);
+  margin: 0.2rem auto 0;
+  aspect-ratio: 1;
+  --tone: var(--idle);
+}
+.dial-cooling { --tone: var(--cool); }
+.dial-heating { --tone: var(--heat); }
+.dial::before {
+  content: "";
+  position: absolute;
+  inset: 11%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--tone) 16%, var(--surface)), var(--surface) 72%);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.dial-off::before { background: var(--surface); }
+.dial svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; user-select: none; overflow: visible; }
+.dial.live svg { cursor: grab; }
+.dial.live svg:active { cursor: grabbing; }
+.dial svg:focus-visible { outline: none; }
+.dial svg:focus-visible ~ .dial-center { outline: 2px solid var(--cool); outline-offset: 4px; border-radius: 50%; }
+.tick { stroke: var(--faint); stroke-width: 1.6; stroke-linecap: round; opacity: 0.4; }
+.tick.on { stroke: var(--tone); opacity: 1; }
+.dial-off .tick { opacity: 0.25; }
+.mark-room { stroke: var(--text); stroke-width: 2.6; stroke-linecap: round; opacity: 0.85; }
+.mark-target { stroke: var(--tone); stroke-width: 4; stroke-linecap: round; }
+.dial-off .mark-target { stroke: var(--faint); }
+.dial-center {
+  position: absolute;
+  inset: 22%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 0.1rem;
+  pointer-events: none;
+}
+.dial-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.dial-number { font-size: 3.1rem; font-weight: 300; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.dial-off .dial-number { color: var(--faint); }
+.dial-now { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 0.15rem; }
+
+.dial-actions { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: -0.3rem; }
+.round {
+  width: 2.7rem;
+  height: 2.7rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.round:hover:not(:disabled) { border-color: var(--faint); background: var(--idle-bg); }
+.round svg { width: 1.15rem; height: 1.15rem; }
+.round.power.is-on { color: var(--ok); border-color: var(--ok); }
+.round.power.is-off { color: var(--muted); }
+.round.tiny { width: 1.9rem; height: 1.9rem; font-size: 1.05rem; }
+
+/* Tiles for every other device */
+.grid.tiles { grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); margin-top: 0.9rem; }
+.grid:first-child.tiles { margin-top: 0; }
+.tile { padding: 0.9rem 1rem; display: grid; gap: 0.7rem; position: relative; overflow: hidden; }
+.tile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--idle); opacity: 0.45; }
+.tile-unit::before { background: var(--cool); opacity: 0.7; }
+.tile-equipment::before { background: var(--heat); opacity: 0.7; }
+.tile-instrument::before { background: var(--ok); opacity: 0.7; }
+.kind { color: var(--faint); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 0.1rem; }
+.tile-body { display: grid; gap: 0.7rem; }
+.tile .name { font-size: 1rem; }
+.readout-value { font-size: 1.7rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.tile-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.tile-body > button.small { justify-self: start; }
+.stepper-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.86rem; color: var(--muted); }
+.stepper-name { margin-right: auto; }
+.stepper-value { min-width: 3.2rem; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+.meter { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--muted); }
+.meter-track { height: 6px; border-radius: 99px; background: var(--idle-bg); overflow: hidden; }
+.meter-fill { height: 100%; border-radius: 99px; background: var(--cool); }
+.meter-fill.warn { background: var(--heat); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+button.small[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
+
 /* Tabs */
 .tabs {
   display: flex;
@@ -164,8 +250,8 @@ input {
 .note { color: var(--muted); font-size: 0.88rem; max-width: 46rem; }
 .worlds { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; color: var(--muted); font-size: 0.86rem; }
 .worlds b { color: var(--text); font-weight: 600; }
-.folder-form { max-width: 22rem; margin-bottom: 1.4rem; }
-.folder-form:empty { display: none; }
+.home-form { max-width: 22rem; margin-bottom: 1.4rem; }
+.home-form:empty { display: none; }
 
 /* Folders */
 .group { margin-bottom: 2rem; }
@@ -183,7 +269,7 @@ input {
 .group-actions { display: flex; align-items: center; gap: 0.5rem; }
 .group-head .edit { opacity: 1; }
 .group-head .rename { width: 100%; max-width: 22rem; }
-.folder-empty { color: var(--faint); font-size: 0.9rem; padding: 0.4rem 0 0.2rem; }
+.home-empty { color: var(--faint); font-size: 0.9rem; padding: 0.4rem 0 0.2rem; }
 
 .grid {
   display: grid;
@@ -407,7 +493,7 @@ button.small-link { font-size: 0.82rem; white-space: nowrap; }
 .fc-note { grid-column: 1 / -1; color: var(--faint); font-size: 0.78rem; }
 
 .card-foot { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.folder-pick { display: flex; align-items: center; gap: 0.45rem; color: var(--muted); font-size: 0.85rem; min-width: 0; }
+.home-pick { display: flex; align-items: center; gap: 0.45rem; color: var(--muted); font-size: 0.85rem; min-width: 0; }
 select {
   font: inherit;
   font-size: 0.85rem;

@@ -4,16 +4,22 @@ import com.ezstats.account.AccountStore;
 import com.ezstats.account.Nicknames;
 import com.ezstats.account.PasswordHasher;
 import com.ezstats.link.LinkManager;
+import com.ezstats.snapshot.DeviceJson;
 import com.ezstats.snapshot.SnapshotService;
+import com.github.blade.hvac.api.EquipmentView;
 import com.github.blade.hvac.api.EzvacApi;
+import com.github.blade.hvac.api.HvacDevice;
+import com.github.blade.hvac.api.InstrumentView;
 import com.github.blade.hvac.api.Position;
 import com.github.blade.hvac.api.ThermostatView;
+import com.github.blade.hvac.api.VentView;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -51,7 +57,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         switch (sub) {
             case "register" -> register(sender, args, false);
             case "password" -> register(sender, args, true);
-            case "own" -> own(sender);
+            case "own" -> own(sender, args);
             case "disown" -> disown(sender);
             case "nick", "rename" -> nick(sender, args);
             case "link" -> link(sender);
@@ -103,83 +109,134 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
                         : "Registered. Sign in at " + plugin.publicUrl() + " as " + name + ".", NamedTextColor.GREEN);
                 say(player, "Don't use a password from anywhere else: commands you type can show up in the "
                         + "server's console and logs.", NamedTextColor.GRAY);
-                if (!change) say(player, "Now look at a thermostat and run /ezstats own to put it on your page.",
+                if (!change) say(player, "Now look at a device and run /ezstats own to put it on your page.",
                         NamedTextColor.GRAY);
             });
         });
     }
 
-    /** {@code /ezstats own}: claims the thermostat the player is looking at. */
-    private void own(CommandSender sender) {
-        Player player = playerOnly(sender, "Only a player can own a thermostat.");
+    /**
+     * {@code /ezstats own}: claims the device the player is looking at. {@code /ezstats own system}
+     * claims every device of its system too: the thermostat, its equipment, vents and panels.
+     */
+    private void own(CommandSender sender, String[] args) {
+        Player player = playerOnly(sender, "Only a player can own a device.");
         if (player == null) return;
-        Optional<ThermostatView> thermostat = lookedAt(player);
-        if (thermostat.isEmpty()) {
-            say(player, "Look at a thermostat's sign within " + (int) REACH + " blocks, then run /ezstats own.",
-                    NamedTextColor.RED);
+        boolean wholeSystem = args.length > 1 && args[1].equalsIgnoreCase("system");
+        if (args.length > 1 && !wholeSystem) {
+            say(player, "Use /ezstats own, or /ezstats own system to claim its whole system.", NamedTextColor.RED);
             return;
         }
-        ThermostatView view = thermostat.get();
+        Optional<HvacDevice> found = lookedAt(player);
+        if (found.isEmpty()) {
+            say(player, "Look at a device's sign, button or dispenser within " + (int) REACH
+                    + " blocks, then run /ezstats own.", NamedTextColor.RED);
+            return;
+        }
+        HvacDevice device = found.get();
         accounts.touch(player.getUniqueId(), player.getName());
+        if (wholeSystem) {
+            ownSystem(player, device);
+            return;
+        }
         AccountStore.OwnResult result = accounts.own(player.getUniqueId(), player.getName(),
-                SnapshotService.key(view.position()));
+                SnapshotService.key(device.position()));
+        String name = DeviceJson.describe(device);
         switch (result.status()) {
             case CLAIMED -> {
-                say(player, "'" + view.id() + "' is now yours. It shows on your EZStats page.", NamedTextColor.GREEN);
+                say(player, "The " + name + " is now yours. It shows on your EZStats page.", NamedTextColor.GREEN);
                 if (!accounts.hasPassword(player.getUniqueId())) {
                     say(player, "You haven't set a password: use /ezstats register <password> to sign in "
                             + "with one, or /ezstats link for a one-time link.", NamedTextColor.GRAY);
                 }
             }
-            case ALREADY_YOURS -> say(player, "'" + view.id() + "' is already yours.", NamedTextColor.YELLOW);
-            case TAKEN -> say(player, "'" + view.id() + "' belongs to " + result.owner()
+            case ALREADY_YOURS -> say(player, "The " + name + " is already yours.", NamedTextColor.YELLOW);
+            case TAKEN -> say(player, "The " + name + " belongs to " + result.owner()
                     + ". They (or an admin) can release it with /ezstats disown.", NamedTextColor.RED);
         }
     }
 
-    /** {@code /ezstats disown}: lets go of the thermostat the player is looking at. Admins can free any. */
+    /** Claims every device that belongs to the same system as {@code device}, in its world. */
+    private void ownSystem(Player player, HvacDevice device) {
+        Optional<String> system = systemOf(device);
+        if (system.isEmpty()) {
+            say(player, "That device isn't part of a system. Use /ezstats own for just this one.", NamedTextColor.RED);
+            return;
+        }
+        World world = Bukkit.getWorld(device.position().world());
+        if (world == null) return;
+        int claimed = 0;
+        int already = 0;
+        int others = 0;
+        for (HvacDevice member : api.devices(world)) {
+            if (!systemOf(member).equals(system)) continue;
+            AccountStore.OwnResult result = accounts.own(player.getUniqueId(), player.getName(),
+                    SnapshotService.key(member.position()));
+            switch (result.status()) {
+                case CLAIMED -> claimed++;
+                case ALREADY_YOURS -> already++;
+                case TAKEN -> others++;
+            }
+        }
+        say(player, "Claimed " + claimed + " device" + (claimed == 1 ? "" : "s") + " of this system"
+                + (already > 0 ? ", " + already + " already yours" : "")
+                + (others > 0 ? ", " + others + " belong to someone else" : "") + ".",
+                claimed > 0 ? NamedTextColor.GREEN : NamedTextColor.YELLOW);
+    }
+
+    /** The system a device belongs to, if it is in one: thermostats, equipment, vents, panels and monitors are. */
+    private static Optional<String> systemOf(HvacDevice device) {
+        if (device instanceof ThermostatView view) return Optional.of(view.system());
+        if (device instanceof EquipmentView view) return Optional.of(view.system());
+        if (device instanceof VentView view) return Optional.of(view.system());
+        if (device instanceof InstrumentView view) return view.system();
+        return Optional.empty();
+    }
+
+    /** {@code /ezstats disown}: lets go of the device the player is looking at. Admins can free any. */
     private void disown(CommandSender sender) {
-        Player player = playerOnly(sender, "Only a player can look at a thermostat.");
+        Player player = playerOnly(sender, "Only a player can look at a device.");
         if (player == null) return;
-        Optional<ThermostatView> thermostat = lookedAt(player);
-        if (thermostat.isEmpty()) {
-            say(player, "Look at a thermostat's sign within " + (int) REACH + " blocks, then run /ezstats disown.",
+        Optional<HvacDevice> found = lookedAt(player);
+        if (found.isEmpty()) {
+            say(player, "Look at a device within " + (int) REACH + " blocks, then run /ezstats disown.",
                     NamedTextColor.RED);
             return;
         }
-        String key = SnapshotService.key(thermostat.get().position());
+        String key = SnapshotService.key(found.get().position());
+        String name = DeviceJson.describe(found.get());
         Optional<UUID> owner = accounts.ownerOf(key);
         if (owner.isEmpty()) {
-            say(player, "Nobody owns '" + thermostat.get().id() + "'.", NamedTextColor.YELLOW);
+            say(player, "Nobody owns the " + name + ".", NamedTextColor.YELLOW);
         } else if (!owner.get().equals(player.getUniqueId()) && !player.hasPermission("ezstats.admin")) {
-            say(player, "'" + thermostat.get().id() + "' belongs to " + accounts.name(owner.get()) + ".",
-                    NamedTextColor.RED);
+            say(player, "The " + name + " belongs to " + accounts.name(owner.get()) + ".", NamedTextColor.RED);
         } else {
             accounts.release(key);
-            say(player, "'" + thermostat.get().id() + "' is no longer owned by anyone.", NamedTextColor.GREEN);
+            say(player, "The " + name + " is no longer owned by anyone.", NamedTextColor.GREEN);
         }
     }
 
     /**
-     * {@code /ezstats nick <nickname>}: names the thermostat the player is looking at on their EZStats
-     * page. With no nickname it goes back to the sign's own label. The sign itself isn't changed:
-     * EZvac's API can't, and {@code /hvac rename} does that.
+     * {@code /ezstats nick <nickname>}: names the device the player is looking at on their EZStats
+     * page. With no nickname it goes back to its own label. The device itself isn't changed:
+     * EZvac's API can't, and {@code /hvac rename} does that for signs.
      */
     private void nick(CommandSender sender, String[] args) {
-        Player player = playerOnly(sender, "Only a player can look at a thermostat.");
+        Player player = playerOnly(sender, "Only a player can look at a device.");
         if (player == null) return;
-        Optional<ThermostatView> thermostat = lookedAt(player);
-        if (thermostat.isEmpty()) {
-            say(player, "Look at a thermostat's sign within " + (int) REACH + " blocks, then run /ezstats "
+        Optional<HvacDevice> found = lookedAt(player);
+        if (found.isEmpty()) {
+            say(player, "Look at a device within " + (int) REACH + " blocks, then run /ezstats "
                     + args[0].toLowerCase(Locale.ROOT) + " <nickname>.", NamedTextColor.RED);
             return;
         }
-        ThermostatView view = thermostat.get();
-        String key = SnapshotService.key(view.position());
+        HvacDevice device = found.get();
+        String key = SnapshotService.key(device.position());
+        String name = DeviceJson.describe(device);
         if (!accounts.ownerOf(key).equals(Optional.of(player.getUniqueId()))) {
             say(player, accounts.ownerOf(key).isPresent()
-                    ? "'" + view.id() + "' belongs to someone else."
-                    : "Claim '" + view.id() + "' first with /ezstats own.", NamedTextColor.RED);
+                    ? "The " + name + " belongs to someone else."
+                    : "Claim the " + name + " first with /ezstats own.", NamedTextColor.RED);
             return;
         }
         String nickname = Nicknames.clean(String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)));
@@ -190,16 +247,20 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         }
         accounts.setNickname(player.getUniqueId(), key, nickname);
         say(player, nickname.isEmpty()
-                ? "'" + view.id() + "' is shown by its sign's label again."
-                : "'" + view.id() + "' is now called '" + nickname + "' on your EZStats page. The sign is unchanged.",
+                ? "The " + name + " is shown by its own name again."
+                : "The " + name + " is now called '" + nickname + "' on your EZStats page.",
                 NamedTextColor.GREEN);
     }
 
-    /** The thermostat whose sign the player is looking at, found the way EZvac's own commands find a device. */
-    private Optional<ThermostatView> lookedAt(Player player) {
+    /** The device the player is looking at: the one whose sign, button or dispenser is that block. */
+    private Optional<HvacDevice> lookedAt(Player player) {
         Block block = player.getTargetBlockExact((int) REACH);
         if (block == null) return Optional.empty();
-        return api.thermostatAt(Position.of(block.getLocation()));
+        Position position = Position.of(block.getLocation());
+        for (HvacDevice device : api.devices(block.getWorld())) {
+            if (device.position().equals(position)) return Optional.of(device);
+        }
+        return Optional.empty();
     }
 
     // --- sign-in ---------------------------------------------------------------------------
@@ -248,8 +309,8 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
                 NamedTextColor.GRAY);
         if (sender instanceof Player player) {
             say(sender, "You " + (accounts.hasPassword(player.getUniqueId()) ? "have" : "have not set")
-                    + " a password, own " + accounts.owned(player.getUniqueId()).size()
-                    + " thermostat(s), and have " + links.sessionCount(player.getUniqueId())
+                    + " a password, own " + accounts.ownedCount(player.getUniqueId())
+                    + " device(s), and have " + links.sessionCount(player.getUniqueId())
                     + " browser(s) signed in.", NamedTextColor.GRAY);
         }
         if (sender.hasPermission("ezstats.admin")) {
@@ -273,9 +334,9 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     private void help(CommandSender sender, String label) {
         sender.sendMessage(Component.text("EZStats", NamedTextColor.GOLD));
         line(sender, label, "register <password>", "make a website account and set its password");
-        line(sender, label, "own", "claim the thermostat you're looking at; it shows on your page");
-        line(sender, label, "nick [nickname]", "name the thermostat you're looking at (none clears it)");
-        line(sender, label, "disown", "let go of the thermostat you're looking at");
+        line(sender, label, "own [system]", "claim the device you're looking at (or its whole system)");
+        line(sender, label, "nick [nickname]", "name the device you're looking at (none clears it)");
+        line(sender, label, "disown", "let go of the device you're looking at");
         line(sender, label, "password <new>", "change your password");
         line(sender, label, "link", "get a one-time link that signs you in, no password");
         line(sender, label, "unlink", "sign every browser of yours out");

@@ -1,6 +1,6 @@
 "use strict";
 
-// Everything that came from a player (a nickname, a folder or station name, a thermostat's label) is put
+// Everything that came from a player (a nickname, a home or station name, a device's label) is put
 // on the page with textContent, never as HTML.
 
 const POLL_MS = 2000;
@@ -95,12 +95,12 @@ function iconButton(label, onClick) {
   return button;
 }
 
-// --- one inline text form, used to rename a thermostat or a folder and to make a folder -----------
+// --- one inline text form, used to rename a device or a home and to make a home -------------------
 
 function endEditing() {
   editing = false;
   lastKey = "";
-  $("folder-form").replaceChildren();
+  $("home-form").replaceChildren();
   refresh();
 }
 
@@ -149,48 +149,50 @@ function inlineForm({ value, placeholder, label, submit, hint, save }) {
   return form;
 }
 
-function renameThermostat(t, titles) {
+function renameDevice(d, titles) {
   titles.replaceChildren(inlineForm({
-    value: t.nickname || "",
-    placeholder: t.label,
-    label: "Nickname for " + t.label,
+    value: d.nickname || "",
+    placeholder: d.label || typeName(d),
+    label: "Nickname for " + deviceName(d),
     submit: "Save",
-    hint: "Leave it empty to use the sign's name.",
-    save: (value) => post("/api/thermostat/nickname", { key: t.key, nickname: value }),
+    hint: "Leave it empty to use its own name.",
+    save: (value) => post("/api/device/nickname", { key: d.key, nickname: value }),
   }));
 }
 
-function startNewFolder() {
+function startNewHome() {
   if (editing) return;
-  $("folder-form").replaceChildren(inlineForm({
+  $("home-form").replaceChildren(inlineForm({
     value: "",
-    placeholder: "Folder name",
-    label: "New folder name",
+    placeholder: "Home name",
+    label: "New home name",
     submit: "Create",
-    save: (value) => post("/api/folders", { name: value }),
+    save: (value) => post("/api/homes", { name: value }),
   }));
 }
 
-function renameFolder(folder, head) {
+function renameHome(home, head) {
   if (editing) return;
   head.replaceChildren(inlineForm({
-    value: folder.name,
-    placeholder: folder.name,
-    label: "Rename folder " + folder.name,
+    value: home.name,
+    placeholder: home.name,
+    label: "Rename home " + home.name,
     submit: "Save",
-    save: (value) => post("/api/folders/rename", { id: folder.id, name: value }),
+    save: (value) => post("/api/homes/rename", { id: home.id, name: value }),
   }));
 }
 
-async function deleteFolder(folder) {
-  if (!confirm(`Delete the folder "${folder.name}"? Its thermostats aren't deleted: they go back to Unfiled.`)) return;
-  try { await post("/api/folders/delete", { id: folder.id }); lastKey = ""; refresh(); }
+async function deleteHome(home) {
+  if (!confirm(`Delete the home "${home.name}"? Its devices aren't deleted: they go back to "No home".`)) return;
+  try { await post("/api/homes/delete", { id: home.id }); lastKey = ""; refresh(); }
   catch (e) { toast(e.message); }
 }
 
-async function moveToFolder(t, folderId) {
-  try { await post("/api/thermostat/folder", { key: t.key, folder: folderId }); lastKey = ""; refresh(); }
-  catch (e) { toast(e.message); lastKey = ""; refresh(); }
+async function moveToHome(d, homeId) {
+  try { await post("/api/device/home", { key: d.key, home: homeId }); }
+  catch (e) { toast(e.message); }
+  lastKey = "";
+  refresh();
 }
 
 // --- weather ----------------------------------------------------------------------------------
@@ -290,7 +292,7 @@ function forecastList(station) {
 
 // --- the Weather tab: every station ---------------------------------------------------------------
 
-let tab = location.hash === "#weather" ? "weather" : "thermostats";
+let tab = location.hash === "#weather" ? "weather" : "devices";
 let weatherTab = false;   // whether this server has the tab on
 let wxKey = "";
 let wxLoaded = false;     // the Weather tab was opened by a link: load it once the page knows the server has it
@@ -306,9 +308,9 @@ const SKY_ICON = { clear: "☀️", rain: "🌧️", snow: "❄️", thunder: "�
 /** The names of the player's thermostats that this station is the nearest for. */
 function nearestFor(stationKey) {
   if (!data) return [];
-  return data.state.thermostats
+  return data.state.devices
     .filter((t) => t.weather && t.weather.station === stationKey)
-    .map((t) => t.nickname || t.label);
+    .map((t) => deviceName(t));
 }
 
 /** Why a station isn't forecasting, and the word for its pill. */
@@ -507,7 +509,7 @@ async function loadWeather() {
     if (!response.ok) throw new Error("HTTP " + response.status);
     const loaded = await response.json();
     // Same rule as the thermostats page: only rebuild when something changed.
-    const key = JSON.stringify([loaded.stations, loaded.units, data ? data.state.thermostats.map((t) => t.weather) : null]);
+    const key = JSON.stringify([loaded.stations, loaded.units, data ? data.state.devices.map((t) => t.weather) : null]);
     if (key !== wxKey) { wxKey = key; renderWeather(loaded); }
     else $("foot").textContent = `Weather refreshed ${new Date(loaded.generatedAt).toLocaleTimeString()}`;
   } catch (e) {
@@ -516,10 +518,10 @@ async function loadWeather() {
 }
 
 function showTab(name) {
-  tab = weatherTab && name === "weather" ? "weather" : "thermostats";
-  $("view-thermostats").hidden = tab !== "thermostats";
+  tab = weatherTab && name === "weather" ? "weather" : "devices";
+  $("view-devices").hidden = tab !== "devices";
   $("view-weather").hidden = tab !== "weather";
-  for (const id of ["thermostats", "weather"]) {
+  for (const id of ["devices", "weather"]) {
     $("tab-" + id).setAttribute("aria-selected", String(tab === id));
   }
   history.replaceState(null, "", tab === "weather" ? "#weather" : location.pathname);
@@ -527,131 +529,62 @@ function showTab(name) {
   else if (data) { lastKey = ""; stamp(data.state); }
 }
 
-// --- cards ------------------------------------------------------------------------------------
+// --- devices: what every card shares ---------------------------------------------------------------
 
-function card(t, folders) {
-  const node = el("article", "card thermo " + (t.enabled ? t.mode : "off"));
-  const title = t.nickname || t.label;
+/** What a device is called on the page: its owner's nickname, its own label, or what kind of thing it is. */
+function deviceName(d) {
+  return d.nickname || d.label || typeName(d);
+}
 
+/** Where a device is, and what it belongs to, as short phrases for the line under its name. */
+function deviceWhere(d) {
+  const parts = [];
+  if (d.nickname && d.label) parts.push(d.label);
+  if (d.kind !== "thermostat" && !d.label && d.nickname) parts.push(typeName(d));
+  parts.push(`${d.world} ${d.x}, ${d.y}, ${d.z}`);
+  if (d.pool) parts.push("pool");
+  if (d.mini) parts.push("mini");
+  if (d.system) parts.push("system " + d.system);
+  return parts;
+}
+
+/** The top of a card: its name with a rename pencil, where it is, and a pill on the right. */
+function deviceHead(d, pill) {
   const head = el("div", "head");
   const titles = el("div", "titles");
   const row = el("div", "name-row");
+  const title = deviceName(d);
   row.appendChild(el("h3", "name", title));
-  row.appendChild(iconButton("Rename " + title, () => { if (!editing) renameThermostat(t, titles); }));
+  row.appendChild(iconButton("Rename " + title, () => { if (!editing) renameDevice(d, titles); }));
   titles.appendChild(row);
-
-  const where = [];
-  if (t.nickname) where.push(t.label);
-  where.push(`${t.world} ${t.x}, ${t.y}, ${t.z}`);
-  if (t.pool) where.push("pool");
-  if (t.mini) where.push("mini");
-  titles.appendChild(el("div", "sub", where.join(" · ")));
+  titles.appendChild(el("div", "sub", deviceWhere(d).join(" · ")));
   head.appendChild(titles);
-  head.appendChild(el("span", "pill " + (t.enabled ? t.mode : ""), t.enabled ? (MODES[t.mode] || t.mode) : "Off"));
-  node.appendChild(head);
-
-  const reading = el("div", "reading");
-  const room = el("div");
-  const big = el("div", "big", fmt(t.roomF));
-  big.appendChild(el("span", "unit", "°" + units));
-  room.appendChild(big);
-  room.appendChild(el("div", "cap", t.pool ? "Water now" : "Room now"));
-  reading.appendChild(room);
-
-  const target = el("div", "target");
-  const targetNum = el("div", "num", fmt(t.targetF) + "°");
-  target.appendChild(targetNum);
-  target.appendChild(el("div", "cap", "Target"));
-  if (writable) {
-    const stepper = el("div", "stepper");
-    for (const [label, delta] of [["−", -1], ["+", 1]]) {
-      const button = el("button", "small", label);
-      button.type = "button";
-      button.setAttribute("aria-label", (delta < 0 ? "Lower" : "Raise") + " the target of " + title);
-      button.addEventListener("click", () => step(t, delta, targetNum));
-      stepper.appendChild(button);
-    }
-    target.appendChild(stepper);
-  }
-  reading.appendChild(target);
-  node.appendChild(reading);
-
-  const stats = el("div", "stats");
-  const stat = (label, value) => {
-    const item = el("span");
-    item.append(label + " ", el("b", "", value));
-    stats.appendChild(item);
-  };
-  if (Number.isFinite(t.humidity)) stat("Humidity", Math.round(t.humidity) + "%");
-  stat("Equipment", `${t.runningUnits}/${t.totalUnits} running`);
-  if (!writable && t.profile && t.profile !== "normal") stat("Profile", cap(t.profile));
-  node.appendChild(stats);
-
-  if (t.attention && t.attention.length) {
-    const chips = el("div", "chips");
-    for (const item of t.attention) chips.appendChild(el("span", "chip", ATTENTION[item] || item));
-    node.appendChild(chips);
-  }
-
-  if (writable) node.appendChild(profileRow(t, title));
-
-  weatherRow(t, node);
-
-  const foot = el("div", "card-foot");
-  if (folders.length) {
-    const label = el("label", "folder-pick");
-    label.append("Folder ");
-    const select = el("select");
-    select.setAttribute("aria-label", "Folder for " + title);
-    select.appendChild(new Option("Unfiled", ""));
-    for (const f of folders) select.appendChild(new Option(f.name, f.id));
-    select.value = t.folder || "";
-    select.addEventListener("change", () => moveToFolder(t, select.value));
-    label.appendChild(select);
-    foot.appendChild(label);
-  }
-  if (writable) {
-    const power = el("button", "small", t.enabled ? "Switch off" : "Switch on");
-    power.type = "button";
-    power.addEventListener("click", () => {
-      power.disabled = true;
-      control("/api/thermostat/enabled", { key: t.key, enabled: !t.enabled });
-    });
-    foot.appendChild(power);
-  }
-  if (foot.childNodes.length) node.appendChild(foot);
-  return node;
+  if (pill) head.appendChild(pill);
+  return head;
 }
 
-/** Eco, Normal or Turbo for the thermostat's whole system. */
-function profileRow(t, title) {
-  const row = el("div", "profile-row");
-  row.appendChild(el("span", "profile-label", "Profile"));
-  const seg = el("div", "seg small-seg");
-  seg.setAttribute("role", "group");
-  seg.setAttribute("aria-label", "Profile of " + title);
-  for (const name of ["eco", "normal", "turbo"]) {
-    const button = el("button", "", cap(name));
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(t.profile === name));
-    button.addEventListener("click", () => {
-      if (t.profile === name) return;
-      for (const other of seg.children) other.disabled = true;
-      control("/api/thermostat/profile", { key: t.key, profile: name });
-    });
-    seg.appendChild(button);
-  }
-  row.appendChild(seg);
-  return row;
+/** The "Home" menu of a card, or null when the player has made no homes. */
+function homePicker(d, homes) {
+  if (!homes.length) return null;
+  const label = el("label", "home-pick");
+  label.append("Home ");
+  const select = el("select");
+  select.setAttribute("aria-label", "Home for " + deviceName(d));
+  select.appendChild(new Option("No home", ""));
+  for (const h of homes) select.appendChild(new Option(h.name, h.id));
+  select.value = d.home || "";
+  select.addEventListener("change", () => moveToHome(d, select.value));
+  label.appendChild(select);
+  return label;
 }
 
 /**
- * Sends a change to EZvac through the server. Whatever happens, read the thermostat again a moment later
+ * Sends a change to EZvac through the server. Whatever happens, read the device again a moment later
  * (the server reads EZvac again on the next tick) so the page shows what it really is now.
  */
-async function control(path, body) {
+async function act(key, action, value) {
   try {
-    const result = await post(path, body);
+    const result = await post("/api/device/control", { key, action, value });
     if (result.adjusted && result.message) toast(result.message);
   } catch (e) {
     toast(e.message);
@@ -660,14 +593,50 @@ async function control(path, body) {
   setTimeout(refresh, 350);
 }
 
-// One step is a whole degree in the server's units: 1 °F or 1 °C. The number changes at once, so
-// clicking twice quickly steps twice; the page reads the real value back afterwards.
-function step(t, delta, numberEl) {
-  const stepF = units === "C" ? delta * 9 / 5 : delta;
-  const targetF = Math.round((t.targetF + stepF) * 10) / 10;
-  t.targetF = targetF;
-  numberEl.textContent = fmt(targetF) + "°";
-  return control("/api/thermostat/target", { key: t.key, targetF });
+/** A segmented control of choices; the one matching `current` is pressed. `onPick(name)` runs on a click. */
+function segmented(label, names, current, onPick, nameOf) {
+  const seg = el("div", "seg small-seg");
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", label);
+  for (const name of names) {
+    const button = el("button", "", nameOf ? nameOf(name) : cap(name));
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(current === name));
+    button.addEventListener("click", () => {
+      if (current === name) return;
+      for (const other of seg.children) other.disabled = true;
+      onPick(name);
+    });
+    seg.appendChild(button);
+  }
+  return seg;
+}
+
+/** A device's card: the Nest-style dial for a thermostat, a tile for everything else. */
+function deviceCard(d, homes) {
+  return d.kind === "thermostat" ? thermostatCard(d, homes) : deviceTile(d, homes);
+}
+
+/** Thermostats first, then humidity units and fridges, equipment, instruments, and vents last. */
+const KIND_ORDER = { thermostat: 0, unit: 1, equipment: 2, instrument: 3, vent: 4 };
+
+/** The cards of some devices: the dials in one grid, the tiles in another below it. */
+function deviceGrids(list, homes) {
+  const box = document.createDocumentFragment();
+  const sorted = [...list].sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9));
+  const dials = sorted.filter((d) => d.kind === "thermostat");
+  const tiles = sorted.filter((d) => d.kind !== "thermostat");
+  if (dials.length) {
+    const grid = el("div", "grid");
+    for (const d of dials) grid.appendChild(deviceCard(d, homes));
+    box.appendChild(grid);
+  }
+  if (tiles.length) {
+    const grid = el("div", "grid tiles");
+    for (const d of tiles) grid.appendChild(deviceCard(d, homes));
+    box.appendChild(grid);
+  }
+  return box;
 }
 
 // --- page -------------------------------------------------------------------------------------
@@ -685,30 +654,42 @@ function worldMeta(w) {
   return parts.join(" · ");
 }
 
-function section(folder, list, folders) {
+function worldMeta(w) {
+  const parts = [];
+  if (w.season) {
+    parts.push(`${cap(w.season.name)}, day ${w.season.day} of ${w.season.days}${w.season.paused ? " (paused)" : ""}`);
+  }
+  if (w.outdoor) {
+    let outside = `${fmt(w.outdoor.airF)}°${units} outside`;
+    if (w.outdoor.weather) outside += `, ${w.outdoor.weather.toLowerCase()}`;
+    parts.push(outside);
+  }
+  return parts.join(" · ");
+}
+
+/** A home with the devices in it; `home` is null for the devices that are in no home. */
+function homeSection(home, list, homes) {
   const group = el("section", "group");
   const head = el("div", "group-head");
   const titles = el("div", "group-title");
-  titles.appendChild(el("h2", "", folder ? folder.name : "Unfiled"));
-  titles.appendChild(el("span", "group-meta", String(list.length)));
+  titles.appendChild(el("h2", "", home ? home.name : "No home"));
+  titles.appendChild(el("span", "group-meta", `${list.length} device${list.length === 1 ? "" : "s"}`));
   head.appendChild(titles);
-  if (folder) {
+  if (home) {
     const actions = el("div", "group-actions");
-    actions.appendChild(iconButton("Rename folder " + folder.name, () => renameFolder(folder, head)));
+    actions.appendChild(iconButton("Rename home " + home.name, () => renameHome(home, head)));
     const del = el("button", "link small-link", "Delete");
     del.type = "button";
-    del.addEventListener("click", () => deleteFolder(folder));
+    del.addEventListener("click", () => deleteHome(home));
     actions.appendChild(del);
     head.appendChild(actions);
   }
   group.appendChild(head);
 
   if (list.length === 0) {
-    group.appendChild(el("p", "folder-empty", "Nothing here yet. Use the Folder menu on a thermostat to move it in."));
+    group.appendChild(el("p", "home-empty", "Nothing here yet. Use the Home menu on a device to move it in."));
   } else {
-    const grid = el("div", "grid");
-    for (const t of list) grid.appendChild(card(t, folders));
-    group.appendChild(grid);
+    group.appendChild(deviceGrids(list, homes));
   }
   return group;
 }
@@ -725,16 +706,16 @@ function render(d) {
   $("who-name").textContent = d.player;
   $("readonly").hidden = writable;
   if (!writable) {
-    $("readonly").textContent = `${state.readOnlyReason || "Temperatures and power are read-only."} `
-      + "You can still rename thermostats and sort them into folders here.";
+    $("readonly").textContent = `${state.readOnlyReason || "Changing devices is not available."} `
+      + "You can still rename devices and sort them into homes here.";
   }
 
   weatherTab = d.weatherTab === true;
   $("tabs").hidden = !weatherTab;
-  if (!weatherTab) tab = "thermostats";
-  $("view-thermostats").hidden = tab !== "thermostats";
+  if (!weatherTab) tab = "devices";
+  $("view-devices").hidden = tab !== "devices";
   $("view-weather").hidden = tab !== "weather";
-  $("tab-thermostats").setAttribute("aria-selected", String(tab === "thermostats"));
+  $("tab-devices").setAttribute("aria-selected", String(tab === "devices"));
   $("tab-weather").setAttribute("aria-selected", String(tab === "weather"));
   if (tab === "weather" && !wxLoaded) { wxLoaded = true; loadWeather(); }
 
@@ -748,23 +729,19 @@ function render(d) {
     worlds.appendChild(box);
   }
 
-  const folders = state.folders || [];
+  const homes = state.homes || [];
   const groups = $("groups");
   groups.replaceChildren();
-  if (folders.length === 0) {
-    if (state.thermostats.length) {
-      const grid = el("div", "grid");
-      for (const t of state.thermostats) grid.appendChild(card(t, folders));
-      groups.appendChild(grid);
-    }
+  if (homes.length === 0) {
+    if (state.devices.length) groups.appendChild(deviceGrids(state.devices, homes));
   } else {
-    const byFolder = new Map(folders.map((f) => [f.id, []]));
-    const unfiled = [];
-    for (const t of state.thermostats) (byFolder.get(t.folder) || unfiled).push(t);
-    for (const f of folders) groups.appendChild(section(f, byFolder.get(f.id), folders));
-    if (unfiled.length) groups.appendChild(section(null, unfiled, folders));
+    const byHome = new Map(homes.map((h) => [h.id, []]));
+    const loose = [];
+    for (const device of state.devices) (byHome.get(device.home) || loose).push(device);
+    for (const h of homes) groups.appendChild(homeSection(h, byHome.get(h.id), homes));
+    if (loose.length) groups.appendChild(homeSection(null, loose, homes));
   }
-  $("empty").hidden = state.thermostats.length > 0;
+  $("empty").hidden = state.devices.length > 0;
   stamp(state);
 }
 
@@ -786,10 +763,10 @@ async function refresh() {
     if (response.status === 401) return renderUnlinked();
     if (!response.ok) throw new Error("HTTP " + response.status);
     const d = await response.json();
-    if (editing) return;
+    if (editing || changing.size > 0) return; // not while a name is typed or a dial is being turned
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
     const s = d.state;
-    const key = JSON.stringify([s.thermostats, s.worlds, s.folders, s.stations, d.player]);
+    const key = JSON.stringify([s.devices, s.worlds, s.homes, s.stations, d.player]);
     if (key !== lastKey) { lastKey = key; render(d); }
     else stamp(s);
   } catch (e) {
@@ -797,8 +774,8 @@ async function refresh() {
   }
 }
 
-$("new-folder").addEventListener("click", startNewFolder);
-$("tab-thermostats").addEventListener("click", () => showTab("thermostats"));
+$("new-home").addEventListener("click", startNewHome);
+$("tab-devices").addEventListener("click", () => showTab("devices"));
 $("tab-weather").addEventListener("click", () => showTab("weather"));
 $("wx-search").addEventListener("input", (event) => { wxSearch = event.target.value; drawWeather(); });
 $("wx-world").addEventListener("change", (event) => { wxWorld = event.target.value; drawWeather(); });

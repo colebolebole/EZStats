@@ -34,26 +34,27 @@
     <!-- Signed in -->
     <section id="linked" hidden>
       <nav id="tabs" class="tabs" role="tablist" aria-label="Pages" hidden>
-        <button id="tab-thermostats" type="button" role="tab" aria-selected="true">Thermostats</button>
+        <button id="tab-devices" type="button" role="tab" aria-selected="true">Devices</button>
         <button id="tab-weather" type="button" role="tab" aria-selected="false">Weather</button>
       </nav>
 
-      <!-- Your thermostats -->
-      <div id="view-thermostats" role="tabpanel" aria-labelledby="tab-thermostats">
+      <!-- Your devices -->
+      <div id="view-devices" role="tabpanel" aria-labelledby="tab-devices">
         <div class="page-head">
           <div class="title-row">
-            <h1>Your thermostats</h1>
-            <button id="new-folder" type="button" class="small">New folder</button>
+            <h1>Your devices</h1>
+            <button id="new-home" type="button" class="small">New home</button>
           </div>
-          <p id="readonly" class="note" hidden>Temperatures and power are read-only for now, because EZvac's API
-            can't change them yet. You can rename thermostats and sort them into folders here.</p>
+          <p id="readonly" class="note" hidden>Changing devices is not available.
+            You can rename devices and sort them into homes here.</p>
           <div id="worlds" class="worlds"></div>
         </div>
-        <div id="folder-form" class="folder-form"></div>
+        <div id="home-form" class="home-form"></div>
 
         <div id="empty" class="empty" hidden>
-          <h2>No thermostats yet</h2>
-          <p>Look at a thermostat's sign in game and run <code>/ezstats own</code> to add it here.</p>
+          <h2>No devices yet</h2>
+          <p>Look at a thermostat, humidifier, heat pump or any other EZvac device in game and run
+            <code>/ezstats own</code> to add it here. <code>/ezstats own system</code> claims a whole system at once.</p>
         </div>
 
         <div id="groups"></div>
@@ -93,6 +94,8 @@
     </section>
   </main>
 
+  <script src="/dial.js"></script>
+  <script src="/devices.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

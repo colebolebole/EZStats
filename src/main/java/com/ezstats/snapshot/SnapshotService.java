@@ -1,9 +1,10 @@
 package com.ezstats.snapshot;
 
 import com.ezstats.account.AccountStore;
-import com.ezstats.control.ThermostatControl;
+import com.ezstats.control.DeviceControl;
 import com.github.blade.hvac.api.AirQuality;
 import com.github.blade.hvac.api.EzvacApi;
+import com.github.blade.hvac.api.HvacDevice;
 import com.github.blade.hvac.api.OutdoorClimate;
 import com.github.blade.hvac.api.Position;
 import com.github.blade.hvac.api.ThermostatView;
@@ -28,7 +29,7 @@ import java.util.logging.Level;
 
 /**
  * Reads EZvac on the main thread and keeps the result, so web server threads never touch Bukkit or
- * EZvac: EZvac's API is for the main thread only. Thermostats are read every few ticks; weather,
+ * EZvac: EZvac's API is for the main thread only. The devices somebody owns are read every few ticks; weather,
  * which changes slowly, every few seconds: every station, and the nearest one to each owned thermostat.
  * A web thread asks for the part a player owns with {@link #jsonFor}, or every station with
  * {@link #weatherJson}.
@@ -38,7 +39,7 @@ public final class SnapshotService {
 
     /** What one read of the thermostats found. The JSON objects are never changed after they are built. */
     private record Snapshot(long generatedAt, String units, boolean writable, String ezvacVersion,
-                            String apiVersion, Map<String, JsonObject> worlds, Map<String, JsonObject> thermostats) {}
+                            String apiVersion, Map<String, JsonObject> worlds, Map<String, JsonObject> devices) {}
 
     /**
      * Every weather station by key, which station is nearest to each owned thermostat (by the
@@ -50,7 +51,7 @@ public final class SnapshotService {
 
     private final Plugin plugin;
     private final EzvacApi api;
-    private final ThermostatControl control;
+    private final DeviceControl control;
     private final Supplier<Set<String>> ownedKeys;
 
     private volatile Snapshot snapshot;
@@ -60,7 +61,7 @@ public final class SnapshotService {
     private boolean warned;
     private boolean weatherWarned;
 
-    public SnapshotService(Plugin plugin, EzvacApi api, ThermostatControl control, Supplier<Set<String>> ownedKeys) {
+    public SnapshotService(Plugin plugin, EzvacApi api, DeviceControl control, Supplier<Set<String>> ownedKeys) {
         this.plugin = plugin;
         this.api = api;
         this.control = control;
@@ -114,30 +115,30 @@ public final class SnapshotService {
         root.addProperty("ezvacVersion", snap.ezvacVersion());
         root.addProperty("apiVersion", snap.apiVersion());
 
-        JsonArray folders = new JsonArray();
-        for (AccountStore.Folder folder : view.folders()) {
-            JsonObject f = new JsonObject();
-            f.addProperty("id", folder.id());
-            f.addProperty("name", folder.name());
-            folders.add(f);
+        JsonArray homes = new JsonArray();
+        for (AccountStore.Home home : view.homes()) {
+            JsonObject h = new JsonObject();
+            h.addProperty("id", home.id());
+            h.addProperty("name", home.name());
+            homes.add(h);
         }
-        root.add("folders", folders);
+        root.add("homes", homes);
 
-        JsonArray thermostats = new JsonArray();
+        JsonArray devices = new JsonArray();
         Set<String> worldNames = new LinkedHashSet<>();
         Set<String> stationKeys = new LinkedHashSet<>();
-        for (AccountStore.Item item : view.thermostats()) {
-            JsonObject shared = snap.thermostats().get(item.key());
+        for (AccountStore.Item item : view.devices()) {
+            JsonObject shared = snap.devices().get(item.key());
             if (shared == null) continue;
-            JsonObject thermostat = shared.deepCopy();
-            if (!item.nickname().isEmpty()) thermostat.addProperty("nickname", item.nickname());
-            thermostat.addProperty("folder", item.folder());
+            JsonObject device = shared.deepCopy();
+            if (!item.nickname().isEmpty()) device.addProperty("nickname", item.nickname());
+            device.addProperty("home", item.home());
             JsonObject link = wx.links().get(item.key());
             if (link != null) {
-                thermostat.add("weather", link);
+                device.add("weather", link);
                 stationKeys.add(link.get("station").getAsString());
             }
-            thermostats.add(thermostat);
+            devices.add(device);
             worldNames.add(shared.get("world").getAsString());
         }
         JsonArray worlds = new JsonArray();
@@ -152,7 +153,7 @@ public final class SnapshotService {
         }
         root.add("worlds", worlds);
         root.add("stations", stations);
-        root.add("thermostats", thermostats);
+        root.add("devices", devices);
         return GSON.toJson(root);
     }
 
@@ -168,18 +169,21 @@ public final class SnapshotService {
     }
 
     private Snapshot build() {
+        // Only devices somebody owns are turned into JSON: a server can have thousands.
+        Set<String> owned = ownedKeys.get();
         Map<String, JsonObject> worlds = new LinkedHashMap<>();
-        Map<String, JsonObject> thermostats = new LinkedHashMap<>();
+        Map<String, JsonObject> devices = new LinkedHashMap<>();
         for (World world : Bukkit.getWorlds()) {
             worlds.put(world.getName(), worldJson(world));
-            for (ThermostatView view : api.thermostats(world)) {
-                thermostats.put(key(view.position()), thermostatJson(world, view));
+            if (owned.isEmpty()) continue;
+            for (HvacDevice device : api.devices(world)) {
+                String key = key(device.position());
+                if (owned.contains(key)) devices.put(key, DeviceJson.of(api, world, device));
             }
         }
         return new Snapshot(System.currentTimeMillis(), api.units().name(), control.writable(),
-                api.pluginVersion(), api.apiVersion(), worlds, thermostats);
+                api.pluginVersion(), api.apiVersion(), worlds, devices);
     }
-
     // --- weather ----------------------------------------------------------------------------
 
     private void refreshWeather() {
@@ -325,33 +329,6 @@ public final class SnapshotService {
         } catch (RuntimeException ignored) {
             // A world without outdoors (some custom dimensions): leave it out.
         }
-        return out;
-    }
-
-    private JsonObject thermostatJson(World world, ThermostatView view) {
-        Position position = view.position();
-        JsonObject out = new JsonObject();
-        out.addProperty("key", key(position));
-        out.addProperty("label", view.id());
-        out.addProperty("world", world.getName());
-        out.addProperty("x", position.x());
-        out.addProperty("y", position.y());
-        out.addProperty("z", position.z());
-        number(out, "roomF", view.roomF());
-        number(out, "targetF", view.targetF());
-        out.addProperty("mode", view.mode().name().toLowerCase(Locale.ROOT));
-        out.addProperty("enabled", view.enabled());
-        out.addProperty("pool", view.pool());
-        out.addProperty("mini", view.mini());
-        number(out, "humidity", view.humidity());
-        out.addProperty("runningUnits", view.runningUnits());
-        out.addProperty("totalUnits", view.totalUnits());
-        out.addProperty("unitsOff", view.unitsOff());
-        out.addProperty("profile", view.profile().name().toLowerCase(Locale.ROOT));
-        out.addProperty("blocked", view.blocked());
-        JsonArray attention = new JsonArray();
-        for (ThermostatView.Attention item : view.attention()) attention.add(item.name().toLowerCase(Locale.ROOT));
-        out.add("attention", attention);
         return out;
     }
 
