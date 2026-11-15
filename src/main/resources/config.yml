@@ -31,3 +31,8 @@ refresh-ticks: 20
 # How often each thermostat's nearest weather station is read, in ticks (200 = every 10 seconds).
 # Weather changes slowly, so this can be much slower than refresh-ticks.
 weather-refresh-ticks: 200
+
+weather-tab:
+  # The Weather tab shows every weather station and its forecast to any player who is signed in,
+  # with each station's coordinates. Set false to leave it off.
+  enabled: true

@@ -99,7 +99,7 @@ public final class EZStatsPlugin extends JavaPlugin {
 
         snapshots.start(config.getInt("refresh-ticks", 20), config.getInt("weather-refresh-ticks", 200));
         web = new WebServer(getLogger(), links, accounts, snapshots, control, publicUrl.startsWith("https://"),
-                config.getBoolean("web.trust-forwarded-for", false));
+                config.getBoolean("web.trust-forwarded-for", false), config.getBoolean("weather-tab.enabled", true));
         try {
             web.start(bind, port);
             getLogger().info("Website listening on " + bind + ":" + port + "; links point at " + publicUrl);

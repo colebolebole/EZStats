@@ -29,8 +29,9 @@ import java.util.logging.Level;
 /**
  * Reads EZvac on the main thread and keeps the result, so web server threads never touch Bukkit or
  * EZvac: EZvac's API is for the main thread only. Thermostats are read every few ticks; weather,
- * which changes slowly and costs more, every few seconds and only for thermostats somebody owns.
- * A web thread asks for the part a player owns with {@link #jsonFor}.
+ * which changes slowly, every few seconds: every station, and the nearest one to each owned thermostat.
+ * A web thread asks for the part a player owns with {@link #jsonFor}, or every station with
+ * {@link #weatherJson}.
  */
 public final class SnapshotService {
     private static final Gson GSON = new Gson();
@@ -39,8 +40,13 @@ public final class SnapshotService {
     private record Snapshot(long generatedAt, String units, boolean writable, String ezvacVersion,
                             String apiVersion, Map<String, JsonObject> worlds, Map<String, JsonObject> thermostats) {}
 
-    /** The weather stations that are nearest to owned thermostats, and which thermostat uses which. */
-    private record Weather(Map<String, JsonObject> stations, Map<String, JsonObject> links) {}
+    /**
+     * Every weather station by key, which station is nearest to each owned thermostat (by the
+     * thermostat's key), and all the stations as the finished JSON of the Weather tab.
+     */
+    private record Weather(Map<String, JsonObject> stations, Map<String, JsonObject> links, String json) {}
+
+    private static final String NO_WEATHER = "{\"generatedAt\":0,\"units\":\"F\",\"stations\":[]}";
 
     private final Plugin plugin;
     private final EzvacApi api;
@@ -48,7 +54,7 @@ public final class SnapshotService {
     private final Supplier<Set<String>> ownedKeys;
 
     private volatile Snapshot snapshot;
-    private volatile Weather weather = new Weather(Map.of(), Map.of());
+    private volatile Weather weather = new Weather(Map.of(), Map.of(), NO_WEATHER);
     private BukkitTask task;
     private BukkitTask weatherTask;
     private boolean warned;
@@ -74,6 +80,11 @@ public final class SnapshotService {
         if (weatherTask != null) weatherTask.cancel();
         task = null;
         weatherTask = null;
+    }
+
+    /** Every weather station in every world with its forecast, as JSON. Safe from any thread. */
+    public String weatherJson() {
+        return weather.json();
     }
 
     /**
@@ -169,36 +180,59 @@ public final class SnapshotService {
     }
 
     /**
-     * For each owned thermostat, the nearest working weather station that can see its spot:
-     * {@code weatherStationsNear} answers nearest first, within the range EZvac's own
-     * {@code /hvac forecast} uses. A thermostat with none gets no weather.
+     * Every station in every world, working or not, for the Weather tab; and for each owned
+     * thermostat the nearest working one that can see its spot: {@code weatherStationsNear} answers
+     * nearest first, within the range EZvac's own {@code /hvac forecast} uses. A thermostat with
+     * none gets no weather.
      */
     private Weather buildWeather() {
-        Set<String> owned = ownedKeys.get();
         Map<String, JsonObject> stations = new LinkedHashMap<>();
-        Map<String, JsonObject> links = new LinkedHashMap<>();
-        if (owned.isEmpty()) return new Weather(stations, links);
-
-        for (ThermostatView thermostat : api.thermostats()) {
-            String key = key(thermostat.position());
-            if (!owned.contains(key)) continue;
-            Location location = thermostat.position().toLocation();
-            if (location == null) continue; // its world isn't loaded
-            List<WeatherStationView> near = api.weatherStationsNear(location);
-            if (near.isEmpty()) continue;
-
-            WeatherStationView station = near.get(0);
-            String stationKey = key(station.position());
-            stations.computeIfAbsent(stationKey, k -> stationJson(stationKey, station));
-
-            double dx = station.position().x() - thermostat.position().x();
-            double dz = station.position().z() - thermostat.position().z();
-            JsonObject link = new JsonObject();
-            link.addProperty("station", stationKey);
-            link.addProperty("distance", (int) Math.round(Math.hypot(dx, dz)));
-            links.put(key, link);
+        for (World world : Bukkit.getWorlds()) {
+            for (WeatherStationView station : api.weatherStations(world)) {
+                String stationKey = key(station.position());
+                stations.put(stationKey, stationJson(stationKey, station));
+            }
         }
-        return new Weather(stations, links);
+
+        Map<String, JsonObject> links = new LinkedHashMap<>();
+        Set<String> owned = ownedKeys.get();
+        if (!owned.isEmpty()) {
+            for (ThermostatView thermostat : api.thermostats()) {
+                String key = key(thermostat.position());
+                if (!owned.contains(key)) continue;
+                Location location = thermostat.position().toLocation();
+                if (location == null) continue; // its world isn't loaded
+                List<WeatherStationView> near = api.weatherStationsNear(location);
+                if (near.isEmpty()) continue;
+
+                WeatherStationView station = near.get(0);
+                String stationKey = key(station.position());
+                stations.computeIfAbsent(stationKey, k -> stationJson(stationKey, station));
+
+                double dx = station.position().x() - thermostat.position().x();
+                double dz = station.position().z() - thermostat.position().z();
+                JsonObject link = new JsonObject();
+                link.addProperty("station", stationKey);
+                link.addProperty("distance", (int) Math.round(Math.hypot(dx, dz)));
+                links.put(key, link);
+            }
+        }
+        return new Weather(stations, links, weatherTabJson(stations));
+    }
+
+    /** All stations, by world and then label, with the units to show them in. */
+    private String weatherTabJson(Map<String, JsonObject> stations) {
+        List<JsonObject> sorted = new java.util.ArrayList<>(stations.values());
+        sorted.sort(java.util.Comparator
+                .comparing((JsonObject s) -> s.has("world") ? s.get("world").getAsString() : "")
+                .thenComparing(s -> s.get("label").getAsString(), String.CASE_INSENSITIVE_ORDER));
+        JsonArray list = new JsonArray();
+        sorted.forEach(list::add);
+        JsonObject root = new JsonObject();
+        root.addProperty("generatedAt", System.currentTimeMillis());
+        root.addProperty("units", api.units().name());
+        root.add("stations", list);
+        return GSON.toJson(root);
     }
 
     private JsonObject stationJson(String key, WeatherStationView station) {
@@ -211,6 +245,9 @@ public final class SnapshotService {
         out.addProperty("x", position.x());
         out.addProperty("y", position.y());
         out.addProperty("z", position.z());
+        out.addProperty("enabled", station.enabled());
+        out.addProperty("intact", station.intact());
+        out.addProperty("working", station.working());
         out.addProperty("lightningStrikes", station.lightningStrikes());
         out.addProperty("areaRadius", station.areaRadius());
         number(out, "outdoorF", station.outdoorF());

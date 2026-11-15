@@ -61,13 +61,15 @@ public final class WebServer {
     private final ThermostatControl control;
     private final boolean secureCookie;
     private final boolean trustForwardedFor;
+    private final boolean weatherTab;
     private final Map<String, byte[]> files = new java.util.HashMap<>();
 
     private HttpServer server;
     private ExecutorService executor;
 
     public WebServer(Logger log, LinkManager links, AccountStore accounts, SnapshotService snapshots,
-                     ThermostatControl control, boolean secureCookie, boolean trustForwardedFor) {
+                     ThermostatControl control, boolean secureCookie, boolean trustForwardedFor,
+                     boolean weatherTab) {
         this.log = log;
         this.links = links;
         this.accounts = accounts;
@@ -75,6 +77,7 @@ public final class WebServer {
         this.control = control;
         this.secureCookie = secureCookie;
         this.trustForwardedFor = trustForwardedFor;
+        this.weatherTab = weatherTab;
     }
 
     public void start(String bind, int port) throws IOException {
@@ -115,6 +118,8 @@ public final class WebServer {
                 link(exchange);
             } else if (method.equals("GET") && path.equals("/api/state")) {
                 state(exchange);
+            } else if (method.equals("GET") && path.equals("/api/weather")) {
+                weather(exchange);
             } else if (method.equals("POST") && path.equals("/api/thermostat/target")) {
                 change(exchange, true);
             } else if (method.equals("POST") && path.equals("/api/thermostat/enabled")) {
@@ -262,9 +267,25 @@ public final class WebServer {
             return;
         }
         LinkManager.Session who = session.get();
-        String body = "{\"player\":" + GSON.toJson(who.name()) + ",\"state\":"
+        String body = "{\"player\":" + GSON.toJson(who.name()) + ",\"weatherTab\":" + weatherTab + ",\"state\":"
                 + snapshots.jsonFor(accounts.view(who.player())) + "}";
         send(exchange, 200, "application/json; charset=utf-8", body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Every weather station and its forecast, for any signed-in player: unlike thermostats, which belong
+     * to one player, stations are the server's. An admin can switch the tab off with weather-tab.enabled.
+     */
+    private void weather(HttpExchange exchange) throws IOException {
+        if (session(exchange).isEmpty()) {
+            json(exchange, 401, error("Not signed in."));
+            return;
+        }
+        if (!weatherTab) {
+            json(exchange, 404, error("The weather tab is switched off on this server."));
+            return;
+        }
+        send(exchange, 200, "application/json; charset=utf-8", snapshots.weatherJson().getBytes(StandardCharsets.UTF_8));
     }
 
     private void change(HttpExchange exchange, boolean target) throws IOException {

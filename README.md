@@ -4,7 +4,8 @@ A web dashboard for [EZvac](https://github.com/EZvac-Plugin/EZvac) thermostats. 
 website account in game, claim the thermostats that are theirs, and sign in to see them live:
 room and target temperature, mode, humidity, running equipment and what needs attention. Each
 thermostat also shows the weather and seven-day forecast from its nearest weather station, and
-players can sort their thermostats into folders.
+players can sort their thermostats into folders. A Weather tab shows every weather station and its
+forecast to all signed-in players.
 
 **Read-only for now.** EZvac's public API (through 1.11) can only read; it has no call to set a
 target or switch a system on or off. EZStats is built so that changing thermostats from the
@@ -18,7 +19,7 @@ methods, changes are made in game and the dashboard says so.
 
 ## Install
 
-1. Put `EZStats-0.4.0.jar` in `plugins/` next to EZvac.
+1. Put `EZStats-0.5.0.jar` in `plugins/` next to EZvac.
 2. Start the server once, then edit `plugins/EZStats/config.yml`: set `web.public-url` to the
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
@@ -53,6 +54,17 @@ plus the station's wind and air right now.
 - **How often:** every `weather-refresh-ticks` (default 200, ten seconds), and only for thermostats
   somebody owns.
 - Temperatures use the server's units (°F or °C), and wind shows in mph or km/h to match.
+
+### The Weather tab
+
+The **Weather** tab lists every weather station on the server, grouped by world, with its seven-day
+forecast, wind, air quality and lightning strikes. Stations that aren't forecasting show why: switched
+off by an admin, tower damaged, or not measured yet. A station that is the nearest for one of your
+thermostats says so.
+
+Unlike thermostats, which belong to one player, stations are the server's, so **any signed-in player**
+sees all of them, with their coordinates. Visitors who aren't signed in see nothing. To leave the tab
+off, set `weather-tab.enabled: false` in `config.yml`.
 
 ## Folders
 
@@ -115,5 +127,5 @@ whenever `writable()` is true. When EZvac's API can change thermostats, implemen
 mvn package
 ```
 
-The jar is `target/EZStats-0.4.0.jar`. EZvac's API comes from JitPack and is `provided`: never
+The jar is `target/EZStats-0.5.0.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.

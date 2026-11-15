@@ -33,23 +33,45 @@
 
     <!-- Signed in -->
     <section id="linked" hidden>
-      <div class="page-head">
-        <div class="title-row">
-          <h1>Your thermostats</h1>
-          <button id="new-folder" type="button" class="small">New folder</button>
+      <nav id="tabs" class="tabs" role="tablist" aria-label="Pages" hidden>
+        <button id="tab-thermostats" type="button" role="tab" aria-selected="true">Thermostats</button>
+        <button id="tab-weather" type="button" role="tab" aria-selected="false">Weather</button>
+      </nav>
+
+      <!-- Your thermostats -->
+      <div id="view-thermostats" role="tabpanel" aria-labelledby="tab-thermostats">
+        <div class="page-head">
+          <div class="title-row">
+            <h1>Your thermostats</h1>
+            <button id="new-folder" type="button" class="small">New folder</button>
+          </div>
+          <p id="readonly" class="note" hidden>Temperatures and power are read-only for now, because EZvac's API
+            can't change them yet. You can rename thermostats and sort them into folders here.</p>
+          <div id="worlds" class="worlds"></div>
         </div>
-        <p id="readonly" class="note" hidden>Temperatures and power are read-only for now, because EZvac's API
-          can't change them yet. You can rename thermostats and sort them into folders here.</p>
-        <div id="worlds" class="worlds"></div>
-      </div>
-      <div id="folder-form" class="folder-form"></div>
+        <div id="folder-form" class="folder-form"></div>
 
-      <div id="empty" class="empty" hidden>
-        <h2>No thermostats yet</h2>
-        <p>Look at a thermostat's sign in game and run <code>/ezstats own</code> to add it here.</p>
+        <div id="empty" class="empty" hidden>
+          <h2>No thermostats yet</h2>
+          <p>Look at a thermostat's sign in game and run <code>/ezstats own</code> to add it here.</p>
+        </div>
+
+        <div id="groups"></div>
       </div>
 
-      <div id="groups"></div>
+      <!-- Every weather station -->
+      <div id="view-weather" role="tabpanel" aria-labelledby="tab-weather" hidden>
+        <div class="page-head">
+          <h1>Weather stations</h1>
+          <p class="note">Every weather station on the server and its seven-day forecast. Stations are built by admins in the Overworld.</p>
+        </div>
+        <div id="wx-empty" class="empty" hidden>
+          <h2>No weather stations yet</h2>
+          <p>An admin can build one: see EZvac's weather station guide, then run <code>/hvac create weatherstation</code>.</p>
+        </div>
+        <div id="wx-groups"></div>
+      </div>
+
       <p id="foot" class="foot"></p>
     </section>
   </main>

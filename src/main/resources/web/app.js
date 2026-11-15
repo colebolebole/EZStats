@@ -239,6 +239,15 @@ function weatherRow(t, node) {
   if (open) node.appendChild(forecastPanel(t, station));
 }
 
+/** What a station measures right now, as short phrases. */
+function stationBits(station) {
+  const bits = [];
+  if (station.wind) bits.push("Wind " + windText(station.wind));
+  if (station.air) bits.push(`Air ${station.air.aqi}, ${BAND[station.air.band] || station.air.band}`);
+  if (station.lightningStrikes > 0) bits.push(`${station.lightningStrikes} lightning strike${station.lightningStrikes === 1 ? "" : "s"}`);
+  return bits;
+}
+
 function forecastPanel(t, station) {
   const panel = el("div", "forecast");
   const head = el("div", "fc-head");
@@ -246,16 +255,19 @@ function forecastPanel(t, station) {
   head.append(` · ${t.weather.distance} blocks away`);
   panel.appendChild(head);
 
-  const bits = [];
-  if (station.wind) bits.push("Wind " + windText(station.wind));
-  if (station.air) bits.push(`Air ${station.air.aqi}, ${BAND[station.air.band] || station.air.band}`);
-  if (station.lightningStrikes > 0) bits.push(`${station.lightningStrikes} lightning strike${station.lightningStrikes === 1 ? "" : "s"}`);
+  const bits = stationBits(station);
   if (bits.length) panel.appendChild(el("div", "fc-now", bits.join(" · ")));
 
   if (!station.forecast.length) {
     panel.appendChild(el("div", "fc-now", "This station isn't forecasting right now."));
     return panel;
   }
+  panel.appendChild(forecastList(station));
+  return panel;
+}
+
+/** The seven days of a station: day, sky, high and low, rain, and a line of notes. */
+function forecastList(station) {
   const list = el("ul", "fc-days");
   for (const d of station.forecast) {
     const li = el("li");
@@ -271,8 +283,133 @@ function forecastPanel(t, station) {
     if (extra.length) li.appendChild(el("span", "fc-note", extra.join(" · ")));
     list.appendChild(li);
   }
-  panel.appendChild(list);
-  return panel;
+  return list;
+}
+
+// --- the Weather tab: every station ---------------------------------------------------------------
+
+let tab = location.hash === "#weather" ? "weather" : "thermostats";
+let weatherTab = false;  // whether this server has the tab on
+let wxKey = "";
+let wxLoaded = false;   // the Weather tab was opened by a link: load it once the page knows the server has it
+const WX_POLL_MS = 10000;
+
+/** The names of the player's thermostats that this station is the nearest for. */
+function nearestFor(stationKey) {
+  if (!data) return [];
+  return data.state.thermostats
+    .filter((t) => t.weather && t.weather.station === stationKey)
+    .map((t) => t.nickname || t.label);
+}
+
+function stationCard(station) {
+  const working = station.working;
+  const node = el("article", "card station" + (working ? "" : " idle"));
+
+  const head = el("div", "head");
+  const titles = el("div", "titles");
+  titles.appendChild(el("h3", "name", station.label));
+  const where = [`${station.x}, ${station.y}, ${station.z}`];
+  if (station.areaRadius) where.push(`measures ${station.areaRadius} blocks around`);
+  titles.appendChild(el("div", "sub", where.join(" · ")));
+  head.appendChild(titles);
+  head.appendChild(el("span", "pill " + (working ? "good" : ""), working ? "Forecasting" : station.enabled ? (station.intact ? "Waiting" : "Damaged") : "Off"));
+  node.appendChild(head);
+
+  const mine = nearestFor(station.key);
+  if (mine.length) {
+    const chips = el("div", "chips");
+    chips.appendChild(el("span", "chip mine", "Nearest for " + mine.join(", ")));
+    node.appendChild(chips);
+  }
+
+  if (!working) {
+    node.appendChild(el("div", "why", !station.enabled ? "Switched off by an admin."
+      : !station.intact ? "Its tower is damaged, so it can't forecast until it is repaired."
+      : "It hasn't measured the weather yet."));
+    return node;
+  }
+
+  const today = station.forecast.find((d) => d.daysAhead === 0) || station.forecast[0];
+  const reading = el("div", "reading");
+  const now = el("div");
+  const big = el("div", "big", fmt(station.outdoorF));
+  big.appendChild(el("span", "unit", "°" + units));
+  now.appendChild(big);
+  now.appendChild(el("div", "cap", "Outside now"));
+  reading.appendChild(now);
+
+  const facts = el("div", "wx-facts");
+  if (today) {
+    const sky = el("span");
+    sky.appendChild(el("span", "sky sky-" + today.sky, SKY[today.sky] || today.sky));
+    facts.appendChild(sky);
+    const range = el("span");
+    range.append("High ", el("b", "", whole(today.highF)), " · Low ", el("b", "", whole(today.lowF)));
+    facts.appendChild(range);
+  }
+  reading.appendChild(facts);
+  node.appendChild(reading);
+
+  const bits = stationBits(station);
+  if (bits.length) node.appendChild(el("div", "fc-now", bits.join(" · ")));
+  node.appendChild(forecastList(station));
+  return node;
+}
+
+function renderWeather(wx) {
+  units = wx.units === "C" ? "C" : "F";
+  const groups = $("wx-groups");
+  groups.replaceChildren();
+  const byWorld = new Map();
+  for (const s of wx.stations) {
+    const world = s.world || "Unknown world";
+    if (!byWorld.has(world)) byWorld.set(world, []);
+    byWorld.get(world).push(s);
+  }
+  for (const [world, list] of byWorld) {
+    const group = el("section", "group");
+    const head = el("div", "group-head");
+    const titles = el("div", "group-title");
+    titles.appendChild(el("h2", "", world));
+    titles.appendChild(el("span", "group-meta", `${list.length} station${list.length === 1 ? "" : "s"}`));
+    head.appendChild(titles);
+    group.appendChild(head);
+    const grid = el("div", "grid station-grid");
+    for (const s of list) grid.appendChild(stationCard(s));
+    group.appendChild(grid);
+    groups.appendChild(group);
+  }
+  $("wx-empty").hidden = wx.stations.length > 0;
+  $("foot").textContent = `Weather refreshed ${new Date(wx.generatedAt).toLocaleTimeString()}`;
+}
+
+async function loadWeather() {
+  if (tab !== "weather" || !weatherTab) return;
+  try {
+    const response = await fetch("/api/weather", { cache: "no-store" });
+    if (response.status === 401) return renderUnlinked();
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const wx = await response.json();
+    // Same rule as the thermostats page: only rebuild when something changed.
+    const key = JSON.stringify([wx.stations, wx.units, data ? data.state.thermostats.map((t) => t.weather) : null]);
+    if (key !== wxKey) { wxKey = key; renderWeather(wx); }
+    else $("foot").textContent = `Weather refreshed ${new Date(wx.generatedAt).toLocaleTimeString()}`;
+  } catch (e) {
+    $("foot").textContent = "Can't reach the server. Trying again…";
+  }
+}
+
+function showTab(name) {
+  tab = weatherTab && name === "weather" ? "weather" : "thermostats";
+  $("view-thermostats").hidden = tab !== "thermostats";
+  $("view-weather").hidden = tab !== "weather";
+  for (const id of ["thermostats", "weather"]) {
+    $("tab-" + id).setAttribute("aria-selected", String(tab === id));
+  }
+  history.replaceState(null, "", tab === "weather" ? "#weather" : location.pathname);
+  if (tab === "weather") { wxKey = ""; loadWeather(); }
+  else if (data) { lastKey = ""; stamp(data.state); }
 }
 
 // --- cards ------------------------------------------------------------------------------------
@@ -435,6 +572,15 @@ function render(d) {
   $("who-name").textContent = d.player;
   $("readonly").hidden = writable;
 
+  weatherTab = d.weatherTab === true;
+  $("tabs").hidden = !weatherTab;
+  if (!weatherTab) tab = "thermostats";
+  $("view-thermostats").hidden = tab !== "thermostats";
+  $("view-weather").hidden = tab !== "weather";
+  $("tab-thermostats").setAttribute("aria-selected", String(tab === "thermostats"));
+  $("tab-weather").setAttribute("aria-selected", String(tab === "weather"));
+  if (tab === "weather" && !wxLoaded) { wxLoaded = true; loadWeather(); }
+
   const worlds = $("worlds");
   worlds.replaceChildren();
   for (const w of state.worlds) {
@@ -466,6 +612,7 @@ function render(d) {
 }
 
 function stamp(state) {
+  if (tab === "weather") return; // the Weather tab keeps its own footer
   $("foot").textContent = `EZvac ${state.ezvacVersion || ""} · refreshed ${new Date(state.generatedAt).toLocaleTimeString()}`;
 }
 
@@ -494,6 +641,9 @@ async function refresh() {
 }
 
 $("new-folder").addEventListener("click", startNewFolder);
+$("tab-thermostats").addEventListener("click", () => showTab("thermostats"));
+$("tab-weather").addEventListener("click", () => showTab("weather"));
+setInterval(loadWeather, WX_POLL_MS);
 
 $("login").addEventListener("submit", async (event) => {
   event.preventDefault();
