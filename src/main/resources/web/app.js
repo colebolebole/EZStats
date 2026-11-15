@@ -1,9 +1,10 @@
 "use strict";
 
-// Everything that came from a player (a thermostat's label, a world's name) is put on the page with
-// textContent, never as HTML.
+// Everything that came from a player (a nickname, a thermostat's label, a world's name) is put on the
+// page with textContent, never as HTML.
 
 const POLL_MS = 2000;
+const MAX_NICKNAME = 32;
 const $ = (id) => document.getElementById(id);
 
 const ATTENTION = {
@@ -18,6 +19,8 @@ const MODES = { cooling: "Cooling", heating: "Heating", idle: "Idle" };
 let units = "F";
 let writable = false;
 let lastKey = "";
+let editing = false; // while a nickname is being typed the page is left alone
+let pending = null;  // the newest data that arrived meanwhile
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -26,16 +29,12 @@ function el(tag, className, text) {
   return node;
 }
 
-function show(f) {
-  return units === "C" ? (f - 32) * 5 / 9 : f;
-}
-
-function fmt(f, digits = 1) {
-  return Number.isFinite(f) ? show(f).toFixed(digits) : "–";
-}
+const show = (f) => (units === "C" ? (f - 32) * 5 / 9 : f);
+const fmt = (f) => (Number.isFinite(f) ? show(f).toFixed(1) : "–");
 
 function toast(message) {
   const node = el("div", "toast", message);
+  node.setAttribute("role", "status");
   document.body.appendChild(node);
   setTimeout(() => node.remove(), 3500);
 }
@@ -53,47 +52,135 @@ async function post(path, body) {
   }
 }
 
-function card(t) {
-  const node = el("article", "card" + (t.enabled ? "" : " off"));
+function pencilIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.7");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M13.5 3.5l3 3L7 16H4v-3l9.5-9.5z");
+  svg.appendChild(path);
+  return svg;
+}
 
-  const head = el("div", "card-head");
-  const title = el("div");
-  title.appendChild(el("div", "label", t.label));
-  title.appendChild(el("div", "where", `${t.world} · ${t.x}, ${t.y}, ${t.z}${t.pool ? " · pool" : ""}${t.mini ? " · mini" : ""}`));
-  head.appendChild(title);
-  head.appendChild(el("span", "badge " + (t.enabled ? t.mode : "idle"), t.enabled ? (MODES[t.mode] || t.mode) : "Off"));
+// --- renaming ---------------------------------------------------------------------------------
+
+function startRename(t, titles) {
+  editing = true;
+  const form = el("form", "rename");
+  const input = el("input");
+  input.type = "text";
+  input.maxLength = MAX_NICKNAME;
+  input.value = t.nickname || "";
+  input.placeholder = t.label;
+  input.setAttribute("aria-label", "Nickname for " + t.label);
+  const error = el("p", "error");
+  error.hidden = true;
+
+  const actions = el("div", "rename-actions");
+  const save = el("button", "small solid", "Save");
+  save.type = "submit";
+  const cancel = el("button", "small", "Cancel");
+  cancel.type = "button";
+  actions.append(save, cancel);
+  form.append(input, actions, el("span", "rename-hint", "Leave it empty to use the sign's name."), error);
+
+  const finish = () => {
+    editing = false;
+    if (pending) { const data = pending; pending = null; lastKey = ""; render(data); }
+    else { lastKey = ""; refresh(); }
+  };
+  cancel.addEventListener("click", finish);
+  form.addEventListener("keydown", (event) => { if (event.key === "Escape") finish(); });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    error.hidden = true;
+    try {
+      await post("/api/thermostat/nickname", { key: t.key, nickname: input.value });
+      pending = null;
+      finish();
+    } catch (e) {
+      error.textContent = e.message;
+      error.hidden = false;
+      save.disabled = false;
+    }
+  });
+
+  titles.replaceChildren(form);
+  input.focus();
+  input.select();
+}
+
+// --- cards ------------------------------------------------------------------------------------
+
+function card(t) {
+  const node = el("article", "card thermo " + (t.enabled ? t.mode : "off"));
+  const title = t.nickname || t.label;
+
+  const head = el("div", "head");
+  const titles = el("div", "titles");
+  const row = el("div", "name-row");
+  row.appendChild(el("h3", "name", title));
+  const edit = el("button", "edit");
+  edit.type = "button";
+  edit.title = "Rename";
+  edit.setAttribute("aria-label", "Rename " + title);
+  edit.appendChild(pencilIcon());
+  edit.addEventListener("click", () => startRename(t, titles));
+  row.appendChild(edit);
+  titles.appendChild(row);
+
+  const where = [];
+  if (t.nickname) where.push(t.label);
+  where.push(`${t.x}, ${t.y}, ${t.z}`);
+  if (t.pool) where.push("pool");
+  if (t.mini) where.push("mini");
+  titles.appendChild(el("div", "sub", where.join(" · ")));
+  head.appendChild(titles);
+  head.appendChild(el("span", "pill " + (t.enabled ? t.mode : ""), t.enabled ? (MODES[t.mode] || t.mode) : "Off"));
   node.appendChild(head);
 
-  const temps = el("div", "temps");
+  const reading = el("div", "reading");
   const room = el("div");
-  const big = el("div", "room", fmt(t.roomF));
-  big.appendChild(el("small", "", "°" + units));
+  const big = el("div", "big", fmt(t.roomF));
+  big.appendChild(el("span", "unit", "°" + units));
   room.appendChild(big);
-  room.appendChild(el("div", "caption", t.pool ? "Water now" : "Room now"));
-  temps.appendChild(room);
+  room.appendChild(el("div", "cap", t.pool ? "Water now" : "Room now"));
+  reading.appendChild(room);
 
   const target = el("div", "target");
   target.appendChild(el("div", "num", fmt(t.targetF) + "°"));
-  target.appendChild(el("div", "caption", "Target"));
+  target.appendChild(el("div", "cap", "Target"));
   if (writable) {
     const stepper = el("div", "stepper");
     for (const [label, delta] of [["−", -1], ["+", 1]]) {
-      const button = el("button", "", label);
+      const button = el("button", "small", label);
       button.type = "button";
-      button.setAttribute("aria-label", (delta < 0 ? "Lower" : "Raise") + " the target of " + t.label);
+      button.setAttribute("aria-label", (delta < 0 ? "Lower" : "Raise") + " the target of " + title);
       button.addEventListener("click", () => step(t, delta));
       stepper.appendChild(button);
     }
     target.appendChild(stepper);
   }
-  temps.appendChild(target);
-  node.appendChild(temps);
+  reading.appendChild(target);
+  node.appendChild(reading);
 
-  const meta = el("div", "meta");
-  if (Number.isFinite(t.humidity)) meta.appendChild(el("span", "", `Humidity ${Math.round(t.humidity)}%`));
-  meta.appendChild(el("span", "", `Equipment ${t.runningUnits}/${t.totalUnits} running`));
-  if (t.profile && t.profile !== "normal") meta.appendChild(el("span", "", `Profile: ${t.profile}`));
-  node.appendChild(meta);
+  const stats = el("div", "stats");
+  const stat = (label, value) => {
+    const item = el("span");
+    item.append(label + " ", el("b", "", value));
+    stats.appendChild(item);
+  };
+  if (Number.isFinite(t.humidity)) stat("Humidity", Math.round(t.humidity) + "%");
+  stat("Equipment", `${t.runningUnits}/${t.totalUnits} running`);
+  if (t.profile && t.profile !== "normal") stat("Profile", t.profile[0].toUpperCase() + t.profile.slice(1));
+  node.appendChild(stats);
 
   if (t.attention && t.attention.length) {
     const chips = el("div", "chips");
@@ -102,15 +189,13 @@ function card(t) {
   }
 
   if (writable) {
-    const foot = el("div", "card-foot");
-    const power = el("button", "", t.enabled ? "Switch off" : "Switch on");
+    const power = el("button", "small", t.enabled ? "Switch off" : "Switch on");
     power.type = "button";
     power.addEventListener("click", async () => {
-      try { await post("/api/thermostat/enabled", { key: t.key, enabled: !t.enabled }); refresh(); }
+      try { await post("/api/thermostat/enabled", { key: t.key, enabled: !t.enabled }); lastKey = ""; refresh(); }
       catch (e) { toast(e.message); }
     });
-    foot.appendChild(power);
-    node.appendChild(foot);
+    node.appendChild(power);
   }
   return node;
 }
@@ -120,10 +205,27 @@ async function step(t, delta) {
   const stepF = units === "C" ? delta * 9 / 5 : delta;
   try {
     await post("/api/thermostat/target", { key: t.key, targetF: t.targetF + stepF });
+    lastKey = "";
     refresh();
   } catch (e) {
     toast(e.message);
   }
+}
+
+// --- page -------------------------------------------------------------------------------------
+
+function worldMeta(w) {
+  const parts = [];
+  if (w.season) {
+    const name = w.season.name[0].toUpperCase() + w.season.name.slice(1);
+    parts.push(`${name}, day ${w.season.day} of ${w.season.days}${w.season.paused ? " (paused)" : ""}`);
+  }
+  if (w.outdoor) {
+    let outside = `${fmt(w.outdoor.airF)}°${units} outside`;
+    if (w.outdoor.weather) outside += `, ${w.outdoor.weather.toLowerCase()}`;
+    parts.push(outside);
+  }
+  return parts.join(" · ");
 }
 
 function render(data) {
@@ -133,40 +235,42 @@ function render(data) {
 
   $("unlinked").hidden = true;
   $("linked").hidden = false;
-  $("who").textContent = "Signed in as " + data.player;
-  $("logout").hidden = false;
+  $("who").hidden = false;
+  $("who-name").textContent = data.player;
+  $("readonly").hidden = writable;
 
-  const notice = $("notice");
-  notice.hidden = writable;
-  if (!writable) notice.textContent = "Read-only for now: EZvac's API can't change thermostats yet, so changes are made in game.";
-
-  const worlds = $("worlds");
-  worlds.replaceChildren();
-  for (const w of state.worlds) {
-    const box = el("div", "world");
-    box.appendChild(el("b", "", w.name));
-    if (w.season) {
-      box.appendChild(el("span", "", `${w.season.name}, day ${w.season.day} of ${w.season.days}${w.season.paused ? " (paused)" : ""}`));
-    }
-    if (w.outdoor) {
-      const parts = [`${fmt(w.outdoor.airF)}°${units} outside`];
-      if (w.outdoor.weather) parts.push(w.outdoor.weather.toLowerCase());
-      box.appendChild(el("span", "", parts.join(", ")));
-    }
-    worlds.appendChild(box);
+  const groups = $("groups");
+  groups.replaceChildren();
+  const worlds = new Map(state.worlds.map((w) => [w.name, w]));
+  const byWorld = new Map();
+  for (const t of state.thermostats) {
+    if (!byWorld.has(t.world)) byWorld.set(t.world, []);
+    byWorld.get(t.world).push(t);
   }
-
-  const grid = $("grid");
-  grid.replaceChildren(...state.thermostats.map(card));
+  for (const [name, list] of byWorld) {
+    const group = el("section", "group");
+    const head = el("div", "group-head");
+    head.appendChild(el("h2", "", name));
+    const meta = worlds.has(name) ? worldMeta(worlds.get(name)) : "";
+    if (meta) head.appendChild(el("span", "group-meta", meta));
+    group.appendChild(head);
+    const grid = el("div", "grid");
+    for (const t of list) grid.appendChild(card(t));
+    group.appendChild(grid);
+    groups.appendChild(group);
+  }
   $("empty").hidden = state.thermostats.length > 0;
-  $("foot").textContent = `EZvac ${state.ezvacVersion || ""} · API ${state.apiVersion || ""} · refreshed ${new Date(state.generatedAt).toLocaleTimeString()}`;
+  stamp(state);
+}
+
+function stamp(state) {
+  $("foot").textContent = `EZvac ${state.ezvacVersion || ""} · refreshed ${new Date(state.generatedAt).toLocaleTimeString()}`;
 }
 
 function renderUnlinked() {
   $("unlinked").hidden = false;
   $("linked").hidden = true;
-  $("who").textContent = "";
-  $("logout").hidden = true;
+  $("who").hidden = true;
   lastKey = "";
 }
 
@@ -176,10 +280,11 @@ async function refresh() {
     if (response.status === 401) return renderUnlinked();
     if (!response.ok) throw new Error("HTTP " + response.status);
     const data = await response.json();
+    if (editing) { pending = data; return; }
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
     const key = JSON.stringify(data.state.thermostats) + JSON.stringify(data.state.worlds) + data.player;
     if (key !== lastKey) { lastKey = key; render(data); }
-    else $("foot").textContent = `EZvac ${data.state.ezvacVersion || ""} · API ${data.state.apiVersion || ""} · refreshed ${new Date(data.state.generatedAt).toLocaleTimeString()}`;
+    else stamp(data.state);
   } catch (e) {
     $("foot").textContent = "Can't reach the server. Trying again…";
   }
@@ -204,8 +309,9 @@ $("login").addEventListener("submit", async (event) => {
 });
 
 $("logout").addEventListener("click", async () => {
-  try { await post("/api/logout", {}); } catch (_) { /* signed out or not, show the link page */ }
-  lastKey = "";
+  try { await post("/api/logout", {}); } catch (_) { /* signed out or not, show the sign-in page */ }
+  editing = false;
+  pending = null;
   renderUnlinked();
 });
 

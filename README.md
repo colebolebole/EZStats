@@ -17,7 +17,7 @@ methods, changes are made in game and the dashboard says so.
 
 ## Install
 
-1. Put `EZStats-0.2.0.jar` in `plugins/` next to EZvac.
+1. Put `EZStats-0.3.0.jar` in `plugins/` next to EZvac.
 2. Start the server once, then edit `plugins/EZStats/config.yml`: set `web.public-url` to the
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
@@ -28,6 +28,8 @@ methods, changes are made in game and the dashboard says so.
    name. The password is 8 to 128 characters with no spaces.
 2. Look at a thermostat's sign (within 6 blocks) and run **`/ezstats own`**. It's now on your account.
 3. Open the website, sign in with your Minecraft name and password, and your thermostats are there.
+4. Give a thermostat a nickname: look at it and run **`/ezstats nick Living Room`**, or click the
+   pencil next to its name on the website. Nicknames are saved with your account.
 
 Don't reuse a password from anywhere else: commands you type can appear in the server's console
 and logs.
@@ -39,6 +41,7 @@ and logs.
 | `/ezstats register <password>` | `ezstats.use` (everyone) | Makes your website account and sets its password |
 | `/ezstats password <new>` | `ezstats.use` | Changes your password and signs every browser out |
 | `/ezstats own` | `ezstats.use` | Claims the thermostat you're looking at |
+| `/ezstats nick [nickname]` (or `rename`) | `ezstats.use` | Names the thermostat you're looking at, up to 32 characters, on your EZStats page. With no nickname it goes back to the sign's label. The sign itself is unchanged: EZvac's API can't rename, and `/hvac rename` does that |
 | `/ezstats disown` | `ezstats.use` | Lets go of the thermostat you're looking at. Admins can free anyone's |
 | `/ezstats link` | `ezstats.use` | A one-time link that signs your browser in, no password |
 | `/ezstats unlink` | `ezstats.use` | Signs every browser of yours out |
@@ -53,7 +56,7 @@ A thermostat belongs to the first player who runs `/ezstats own` on it, and the 
 player only their own. EZvac has no owner of its own, so EZStats can't tell who built a thermostat:
 on a server where that matters, an admin can free a wrongly claimed one with `/ezstats disown`.
 Ownership ends when the thermostat is broken or removed, so a new one built on the same block
-starts unowned.
+starts unowned, and the nickname goes with it. A nickname belongs to the owner: nobody else sees it.
 
 ## How sign-in works
 
@@ -84,5 +87,5 @@ whenever `writable()` is true. When EZvac's API can change thermostats, implemen
 mvn package
 ```
 
-The jar is `target/EZStats-0.2.0.jar`. EZvac's API comes from JitPack and is `provided`: never
+The jar is `target/EZStats-0.3.0.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.

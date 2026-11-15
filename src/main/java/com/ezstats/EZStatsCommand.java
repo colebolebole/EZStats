@@ -1,6 +1,7 @@
 package com.ezstats;
 
 import com.ezstats.account.AccountStore;
+import com.ezstats.account.Nicknames;
 import com.ezstats.account.PasswordHasher;
 import com.ezstats.link.LinkManager;
 import com.ezstats.snapshot.SnapshotService;
@@ -26,7 +27,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
-/** {@code /ezstats register | password | own | disown | link | unlink | status | reload}. */
+/** {@code /ezstats register | password | own | nick | disown | link | unlink | status | reload}. */
 final class EZStatsCommand implements CommandExecutor, TabCompleter {
     private static final int MIN_PASSWORD = 8;
     private static final int MAX_PASSWORD = 128;
@@ -52,6 +53,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
             case "password" -> register(sender, args, true);
             case "own" -> own(sender);
             case "disown" -> disown(sender);
+            case "nick", "rename" -> nick(sender, args);
             case "link" -> link(sender);
             case "unlink" -> unlink(sender);
             case "status" -> status(sender);
@@ -158,6 +160,41 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /**
+     * {@code /ezstats nick <nickname>}: names the thermostat the player is looking at on their EZStats
+     * page. With no nickname it goes back to the sign's own label. The sign itself isn't changed:
+     * EZvac's API can't, and {@code /hvac rename} does that.
+     */
+    private void nick(CommandSender sender, String[] args) {
+        Player player = playerOnly(sender, "Only a player can look at a thermostat.");
+        if (player == null) return;
+        Optional<ThermostatView> thermostat = lookedAt(player);
+        if (thermostat.isEmpty()) {
+            say(player, "Look at a thermostat's sign within " + (int) REACH + " blocks, then run /ezstats "
+                    + args[0].toLowerCase(Locale.ROOT) + " <nickname>.", NamedTextColor.RED);
+            return;
+        }
+        ThermostatView view = thermostat.get();
+        String key = SnapshotService.key(view.position());
+        if (!accounts.ownerOf(key).equals(Optional.of(player.getUniqueId()))) {
+            say(player, accounts.ownerOf(key).isPresent()
+                    ? "'" + view.id() + "' belongs to someone else."
+                    : "Claim '" + view.id() + "' first with /ezstats own.", NamedTextColor.RED);
+            return;
+        }
+        String nickname = Nicknames.clean(String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)));
+        if (nickname == null) {
+            say(player, "A nickname is at most " + Nicknames.MAX_LENGTH + " characters, with no control characters.",
+                    NamedTextColor.RED);
+            return;
+        }
+        accounts.setNickname(player.getUniqueId(), key, nickname);
+        say(player, nickname.isEmpty()
+                ? "'" + view.id() + "' is shown by its sign's label again."
+                : "'" + view.id() + "' is now called '" + nickname + "' on your EZStats page. The sign is unchanged.",
+                NamedTextColor.GREEN);
+    }
+
     /** The thermostat whose sign the player is looking at, found the way EZvac's own commands find a device. */
     private Optional<ThermostatView> lookedAt(Player player) {
         Block block = player.getTargetBlockExact((int) REACH);
@@ -237,6 +274,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("EZStats", NamedTextColor.GOLD));
         line(sender, label, "register <password>", "make a website account and set its password");
         line(sender, label, "own", "claim the thermostat you're looking at; it shows on your page");
+        line(sender, label, "nick [nickname]", "name the thermostat you're looking at (none clears it)");
         line(sender, label, "disown", "let go of the thermostat you're looking at");
         line(sender, label, "password <new>", "change your password");
         line(sender, label, "link", "get a one-time link that signs you in, no password");
@@ -265,7 +303,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length != 1) return List.of();
-        List<String> options = new ArrayList<>(List.of("register", "own", "disown", "password", "link", "unlink", "status"));
+        List<String> options = new ArrayList<>(List.of("register", "own", "nick", "rename", "disown", "password", "link", "unlink", "status"));
         if (sender.hasPermission("ezstats.admin")) options.add("reload");
         String prefix = args[0].toLowerCase(Locale.ROOT);
         return options.stream().filter(option -> option.startsWith(prefix)).toList();

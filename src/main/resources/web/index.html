@@ -8,36 +8,43 @@
 </head>
 <body>
   <header class="top">
-    <h1>EZStats</h1>
-    <div class="who">
-      <span id="who"></span>
-      <button id="logout" type="button" hidden>Sign out</button>
+    <div class="brand">EZStats</div>
+    <div class="who" id="who" hidden>
+      <span id="who-name"></span>
+      <button id="logout" type="button" class="link">Sign out</button>
     </div>
   </header>
 
   <main>
-    <section id="unlinked" class="panel" hidden>
-      <h2>Sign in</h2>
-      <form id="login" autocomplete="on">
+    <!-- Signed out -->
+    <section id="unlinked" class="signin" hidden>
+      <form id="login" class="card form" autocomplete="on">
+        <h1>Sign in</h1>
         <label for="username">Minecraft name</label>
         <input id="username" name="username" type="text" autocomplete="username" maxlength="32" required>
         <label for="password">Password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
         <p id="login-error" class="error" role="alert" hidden></p>
         <button id="login-submit" type="submit" class="primary">Sign in</button>
+        <p class="hint">No password yet? In game, run <code>/ezstats register &lt;password&gt;</code>, or
+          <code>/ezstats link</code> for a one-time link.</p>
       </form>
-      <p class="hint">No password yet? In game, run <code>/ezstats register &lt;password&gt;</code>.
-        Or run <code>/ezstats link</code> and open the one-time link it gives you.</p>
     </section>
 
+    <!-- Signed in -->
     <section id="linked" hidden>
-      <div id="notice" class="notice" hidden></div>
-      <div id="worlds" class="worlds"></div>
-      <div id="empty" class="panel" hidden>
-        <h2>No thermostats yet</h2>
-        <p>Look at a thermostat's sign in game and run <code>/ezstats own</code> to add it to your account.</p>
+      <div class="page-head">
+        <h1>Your thermostats</h1>
+        <p id="readonly" class="note" hidden>Temperatures and power are read-only for now, because EZvac's API
+          can't change them yet. You can rename thermostats here.</p>
       </div>
-      <div id="grid" class="grid"></div>
+
+      <div id="empty" class="empty" hidden>
+        <h2>No thermostats yet</h2>
+        <p>Look at a thermostat's sign in game and run <code>/ezstats own</code> to add it here.</p>
+      </div>
+
+      <div id="groups"></div>
       <p id="foot" class="foot"></p>
     </section>
   </main>

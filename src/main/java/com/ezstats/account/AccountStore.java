@@ -29,6 +29,8 @@ public final class AccountStore {
         String name;
         String passwordHash;
         final Set<String> owned = new LinkedHashSet<>();
+        /** A thermostat's key to the nickname its owner gave it. Only owned thermostats have one. */
+        final Map<String, String> nicknames = new LinkedHashMap<>();
     }
 
     /** What {@link #own} did. {@code owner} is who has it when {@code TAKEN}. */
@@ -59,6 +61,13 @@ public final class AccountStore {
                 account.name = entry.getString("name", "");
                 account.passwordHash = entry.getString("password");
                 account.owned.addAll(entry.getStringList("thermostats"));
+                for (Map<?, ?> nickname : entry.getMapList("nicknames")) {
+                    Object key = nickname.get("key");
+                    Object value = nickname.get("name");
+                    if (key != null && value != null && account.owned.contains(key.toString())) {
+                        account.nicknames.put(key.toString(), value.toString());
+                    }
+                }
                 accounts.put(UUID.fromString(id), account);
             } catch (IllegalArgumentException e) {
                 log.warning("Skipping an account in " + file.getName() + " with a bad id: " + id);
@@ -128,9 +137,38 @@ public final class AccountStore {
     /** Takes a thermostat away from whoever owns it. Returns whether anyone did. */
     public synchronized boolean release(String key) {
         boolean changed = false;
-        for (Account account : accounts.values()) changed |= account.owned.remove(key);
+        for (Account account : accounts.values()) {
+            changed |= account.owned.remove(key);
+            account.nicknames.remove(key);
+        }
         if (changed) save();
         return changed;
+    }
+
+    /**
+     * Sets a thermostat's nickname, or clears it when {@code nickname} is empty. Only the owner can:
+     * returns false when the player doesn't own the thermostat.
+     */
+    public synchronized boolean setNickname(UUID player, String key, String nickname) {
+        Account account = accounts.get(player);
+        if (account == null || !account.owned.contains(key)) return false;
+        if (nickname.isEmpty()) account.nicknames.remove(key);
+        else account.nicknames.put(key, nickname);
+        save();
+        return true;
+    }
+
+    public synchronized String nickname(UUID player, String key) {
+        Account account = accounts.get(player);
+        return account == null ? "" : account.nicknames.getOrDefault(key, "");
+    }
+
+    /** The thermostats a player owns in the order they claimed them, each with its nickname or "". */
+    public synchronized Map<String, String> ownedWithNicknames(UUID player) {
+        Map<String, String> out = new LinkedHashMap<>();
+        Account account = accounts.get(player);
+        if (account != null) for (String key : account.owned) out.put(key, account.nicknames.getOrDefault(key, ""));
+        return out;
     }
 
     public synchronized Set<String> owned(UUID player) {
@@ -154,6 +192,11 @@ public final class AccountStore {
             yaml.set(base + ".name", account.name);
             if (account.passwordHash != null) yaml.set(base + ".password", account.passwordHash);
             yaml.set(base + ".thermostats", new ArrayList<>(account.owned));
+            List<Map<String, String>> nicknames = new ArrayList<>();
+            for (Map.Entry<String, String> nickname : account.nicknames.entrySet()) {
+                nicknames.add(Map.of("key", nickname.getKey(), "name", nickname.getValue()));
+            }
+            if (!nicknames.isEmpty()) yaml.set(base + ".nicknames", nicknames);
         }
         try {
             File parent = file.getParentFile();

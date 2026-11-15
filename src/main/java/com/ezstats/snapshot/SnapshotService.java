@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 
+
 /**
  * Reads EZvac on the main thread every few ticks and keeps the result, so web server threads never
  * touch Bukkit or EZvac: EZvac's API is for the main thread only. A web thread asks for the part of
@@ -57,10 +58,10 @@ public final class SnapshotService {
     }
 
     /**
-     * The snapshot as JSON, with only the thermostats whose keys are given (and the worlds they are in).
-     * Safe from any thread.
+     * The snapshot as JSON, with only the thermostats in {@code owned} (a key to its nickname, or ""),
+     * in that order, and the worlds they are in. Safe from any thread.
      */
-    public String jsonFor(Set<String> ownedKeys) {
+    public String jsonFor(Map<String, String> owned) {
         Snapshot snap = snapshot;
         JsonObject root = new JsonObject();
         root.addProperty("generatedAt", snap.generatedAt());
@@ -71,11 +72,13 @@ public final class SnapshotService {
 
         JsonArray thermostats = new JsonArray();
         Set<String> worldNames = new java.util.LinkedHashSet<>();
-        for (String key : ownedKeys) {
-            JsonObject thermostat = snap.thermostats().get(key);
-            if (thermostat == null) continue;
+        for (Map.Entry<String, String> entry : owned.entrySet()) {
+            JsonObject shared = snap.thermostats().get(entry.getKey());
+            if (shared == null) continue;
+            JsonObject thermostat = shared.deepCopy();
+            if (!entry.getValue().isEmpty()) thermostat.addProperty("nickname", entry.getValue());
             thermostats.add(thermostat);
-            worldNames.add(thermostat.get("world").getAsString());
+            worldNames.add(shared.get("world").getAsString());
         }
         JsonArray worlds = new JsonArray();
         for (String name : worldNames) {

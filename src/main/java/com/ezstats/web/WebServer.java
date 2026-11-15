@@ -2,6 +2,7 @@ package com.ezstats.web;
 
 import com.ezstats.account.AccountStore;
 import com.ezstats.account.LoginLimiter;
+import com.ezstats.account.Nicknames;
 import com.ezstats.account.PasswordHasher;
 import com.ezstats.control.ThermostatControl;
 import com.ezstats.link.LinkManager;
@@ -118,6 +119,8 @@ public final class WebServer {
                 change(exchange, true);
             } else if (method.equals("POST") && path.equals("/api/thermostat/enabled")) {
                 change(exchange, false);
+            } else if (method.equals("POST") && path.equals("/api/thermostat/nickname")) {
+                nickname(exchange);
             } else if (method.equals("POST") && path.equals("/api/login")) {
                 login(exchange);
             } else if (method.equals("POST") && path.equals("/api/logout")) {
@@ -252,7 +255,7 @@ public final class WebServer {
         }
         LinkManager.Session who = session.get();
         String body = "{\"player\":" + GSON.toJson(who.name()) + ",\"state\":"
-                + snapshots.jsonFor(accounts.owned(who.player())) + "}";
+                + snapshots.jsonFor(accounts.ownedWithNicknames(who.player())) + "}";
         send(exchange, 200, "application/json; charset=utf-8", body.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -286,6 +289,44 @@ public final class WebServer {
         }
         if (result.ok()) json(exchange, 200, "{\"ok\":true}");
         else json(exchange, result.status(), error(result.message()));
+    }
+
+    /**
+     * Sets or clears the signed-in owner's nickname for a thermostat. This is EZStats' own data,
+     * not EZvac's, so it works even while EZvac's API is read-only.
+     */
+    private void nickname(HttpExchange exchange) throws IOException {
+        Optional<LinkManager.Session> session = session(exchange);
+        if (session.isEmpty()) {
+            json(exchange, 401, error("Not signed in."));
+            return;
+        }
+        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
+            json(exchange, 403, error("Missing X-EZStats header"));
+            return;
+        }
+        JsonObject body = readBody(exchange);
+        if (body == null) return;
+        String key;
+        String raw;
+        try {
+            key = body.get("key").getAsString();
+            raw = body.get("nickname").getAsString();
+        } catch (RuntimeException e) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        String nickname = Nicknames.clean(raw);
+        if (nickname == null) {
+            json(exchange, 400, error("A nickname is up to " + Nicknames.MAX_LENGTH
+                    + " characters, with no control characters."));
+            return;
+        }
+        if (!accounts.setNickname(session.get().player(), key, nickname)) {
+            json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+            return;
+        }
+        json(exchange, 200, "{\"ok\":true}");
     }
 
     private void logout(HttpExchange exchange) throws IOException {
