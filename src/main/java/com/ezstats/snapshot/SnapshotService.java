@@ -82,6 +82,18 @@ public final class SnapshotService {
         weatherTask = null;
     }
 
+    /**
+     * Reads the thermostats again on the next tick, so a change made from the website shows at once
+     * instead of at the next regular read. Safe from any thread.
+     */
+    public void refreshSoon() {
+        try {
+            Bukkit.getScheduler().runTask(plugin, this::refresh);
+        } catch (RuntimeException e) {
+            // The plugin is shutting down: there is nothing to refresh.
+        }
+    }
+
     /** Every weather station in every world with its forecast, as JSON. Safe from any thread. */
     public String weatherJson() {
         return weather.json();
@@ -98,6 +110,7 @@ public final class SnapshotService {
         root.addProperty("generatedAt", snap.generatedAt());
         root.addProperty("units", snap.units());
         root.addProperty("writable", snap.writable());
+        if (!snap.writable()) root.addProperty("readOnlyReason", control.readOnlyReason());
         root.addProperty("ezvacVersion", snap.ezvacVersion());
         root.addProperty("apiVersion", snap.apiVersion());
 

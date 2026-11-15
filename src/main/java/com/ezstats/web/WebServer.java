@@ -121,9 +121,11 @@ public final class WebServer {
             } else if (method.equals("GET") && path.equals("/api/weather")) {
                 weather(exchange);
             } else if (method.equals("POST") && path.equals("/api/thermostat/target")) {
-                change(exchange, true);
+                change(exchange, Change.TARGET);
             } else if (method.equals("POST") && path.equals("/api/thermostat/enabled")) {
-                change(exchange, false);
+                change(exchange, Change.ENABLED);
+            } else if (method.equals("POST") && path.equals("/api/thermostat/profile")) {
+                change(exchange, Change.PROFILE);
             } else if (method.equals("POST") && path.equals("/api/thermostat/nickname")) {
                 nickname(exchange);
             } else if (method.equals("POST") && path.equals("/api/thermostat/folder")) {
@@ -288,36 +290,78 @@ public final class WebServer {
         send(exchange, 200, "application/json; charset=utf-8", snapshots.weatherJson().getBytes(StandardCharsets.UTF_8));
     }
 
-    private void change(HttpExchange exchange, boolean target) throws IOException {
-        Optional<LinkManager.Session> session = session(exchange);
-        if (session.isEmpty()) {
-            json(exchange, 401, error("Not linked. Run /ezstats link in game."));
-            return;
-        }
-        // A cross-site form can't set a custom header without a preflight, which this server never grants.
-        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
-            json(exchange, 403, error("Missing X-EZStats header"));
-            return;
-        }
-        JsonObject body = readBody(exchange);
-        if (body == null) return;
-        ThermostatControl.Result result;
-        try {
-            String key = body.get("key").getAsString();
-            // Only the owner may change a thermostat, whatever the control behind this can do.
-            if (!accounts.ownerOf(key).equals(Optional.of(session.get().player()))) {
-                json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
-                return;
-            }
-            result = target
-                    ? control.setTarget(session.get().player(), key, body.get("targetF").getAsDouble())
-                    : control.setEnabled(session.get().player(), key, body.get("enabled").getAsBoolean());
-        } catch (RuntimeException e) {
+    private enum Change { TARGET, ENABLED, PROFILE }
+
+    /**
+     * Changes a thermostat through the {@link ThermostatControl}: its target, power or profile. Only its
+     * owner may, whatever the control behind this can do.
+     */
+    private void change(HttpExchange exchange, Change kind) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        UUID player = call.session().player();
+        String key = text(call.body(), "key");
+        if (key == null) {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        if (result.ok()) json(exchange, 200, "{\"ok\":true}");
-        else json(exchange, result.status(), error(result.message()));
+        if (!accounts.ownerOf(key).equals(Optional.of(player))) {
+            json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+            return;
+        }
+
+        ThermostatControl.Result result;
+        switch (kind) {
+            case TARGET -> {
+                Double target = number(call.body(), "targetF");
+                if (target == null || !Double.isFinite(target)) {
+                    json(exchange, 400, error("Bad request"));
+                    return;
+                }
+                result = control.setTarget(player, key, target);
+            }
+            case ENABLED -> {
+                Boolean enabled = flag(call.body(), "enabled");
+                if (enabled == null) {
+                    json(exchange, 400, error("Bad request"));
+                    return;
+                }
+                result = control.setEnabled(player, key, enabled);
+            }
+            default -> {
+                String profile = text(call.body(), "profile");
+                if (profile == null) {
+                    json(exchange, 400, error("Bad request"));
+                    return;
+                }
+                result = control.setProfile(player, key, profile);
+            }
+        }
+        if (result.ok()) {
+            snapshots.refreshSoon(); // so the page sees the new value at once
+            json(exchange, 200, "{\"ok\":true,\"adjusted\":" + result.adjusted() + ",\"message\":"
+                    + GSON.toJson(result.message()) + "}");
+        } else {
+            json(exchange, result.status(), error(result.message()));
+        }
+    }
+
+    /** A number field of a body, or null when it is missing or not a number. */
+    private static Double number(JsonObject body, String field) {
+        try {
+            return body.getAsJsonPrimitive(field).isNumber() ? body.get(field).getAsDouble() : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** A true/false field of a body, or null when it is missing or not a boolean. */
+    private static Boolean flag(JsonObject body, String field) {
+        try {
+            return body.getAsJsonPrimitive(field).isBoolean() ? body.get(field).getAsBoolean() : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

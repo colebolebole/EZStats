@@ -222,8 +222,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         say(player, "It works once and expires, so don't share it. /ezstats unlink signs every browser out.",
                 NamedTextColor.GRAY);
         if (!plugin.control().writable()) {
-            say(player, "The website is read-only for now: EZvac's API can't change thermostats yet.",
-                    NamedTextColor.GRAY);
+            say(player, "The website is read-only. " + plugin.control().readOnlyReason(), NamedTextColor.GRAY);
         }
     }
 
@@ -244,7 +243,8 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
                         NamedTextColor.GRAY))
                 .append(Component.text(plugin.publicUrl(), NamedTextColor.WHITE)));
         say(sender, plugin.control().writable()
-                ? "Changes from the website: on." : "Changes from the website: off (EZvac's API is read-only).",
+                ? "Changes from the website: on (owners can set the target, power and profile)."
+                : "Changes from the website: off. " + plugin.control().readOnlyReason(),
                 NamedTextColor.GRAY);
         if (sender instanceof Player player) {
             say(sender, "You " + (accounts.hasPassword(player.getUniqueId()) ? "have" : "have not set")

@@ -2,10 +2,16 @@ package com.ezstats.control;
 
 import java.util.UUID;
 
-/** The only control there can be while EZvac's API is read-only: it refuses every change. */
+/** Refuses every change: for an EZvac that can't be controlled, or a server that switched control off. */
 public final class ReadOnlyControl implements ThermostatControl {
-    private static final Result REFUSED = Result.failure(501,
-            "EZvac's API can't change thermostats yet, so the website is read-only.");
+    private final String reason;
+    private final Result refused;
+
+    /** @param reason why, as a sentence: "Changing thermostats is switched off on this server." */
+    public ReadOnlyControl(String reason) {
+        this.reason = reason;
+        this.refused = Result.failure(501, reason);
+    }
 
     @Override
     public boolean writable() {
@@ -13,12 +19,22 @@ public final class ReadOnlyControl implements ThermostatControl {
     }
 
     @Override
+    public String readOnlyReason() {
+        return reason;
+    }
+
+    @Override
     public Result setTarget(UUID actor, String key, double targetF) {
-        return REFUSED;
+        return refused;
     }
 
     @Override
     public Result setEnabled(UUID actor, String key, boolean enabled) {
-        return REFUSED;
+        return refused;
+    }
+
+    @Override
+    public Result setProfile(UUID actor, String key, String profile) {
+        return refused;
     }
 }

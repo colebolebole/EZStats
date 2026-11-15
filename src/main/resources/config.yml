@@ -32,6 +32,14 @@ refresh-ticks: 20
 # Weather changes slowly, so this can be much slower than refresh-ticks.
 weather-refresh-ticks: 200
 
+control:
+  # Lets players change their own thermostats from the website: the target, on and off, and the
+  # profile. It uses EZvac's control API (EZvac BETA 1.0 Pilot 7 or newer) and acts for the signed-in
+  # player, so EZvac's /hvac info shows who changed it and a claims plugin can still refuse it.
+  # Only the owner of a thermostat (/ezstats own) can change it. Set false to make the website
+  # read-only. Needs a server restart to take effect.
+  enabled: true
+
 weather-tab:
   # The Weather tab shows every weather station and its forecast to any player who is signed in,
   # with each station's coordinates. Set false to leave it off.

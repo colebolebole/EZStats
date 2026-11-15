@@ -312,6 +312,31 @@ input {
 button.small-link { font-size: 0.82rem; white-space: nowrap; }
 
 /* Weather tab */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.4rem;
+}
+.toolbar input[type="search"] { flex: 1 1 12rem; max-width: 20rem; }
+.toolbar select { font-size: 0.9rem; padding: 0.5rem 0.6rem; max-width: 14rem; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--surface); }
+.seg button {
+  background: none;
+  border: 0;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.empty.small { padding: 2rem 1rem; }
+.profile-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; font-size: 0.85rem; color: var(--muted); }
+.small-seg button { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+.seg button:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .station { padding: 1.1rem 1.2rem 1rem; display: grid; gap: 0.9rem; position: relative; overflow: hidden; }
 .station::before {
   content: "";
@@ -320,13 +345,46 @@ button.small-link { font-size: 0.82rem; white-space: nowrap; }
   height: 3px;
   background: var(--cool);
 }
-.station.idle::before { background: var(--idle); opacity: 0.55; }
-.station.idle .big { color: var(--muted); }
-.station-grid { grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); }
+.station-grid { grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); }
+
+/* Seven days side by side */
+.strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.15rem;
+  padding: 0.7rem 0 0.2rem;
+  border-top: 1px solid var(--line);
+}
+.strip-day { display: grid; justify-items: center; gap: 0.1rem; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.strip-label { color: var(--faint); font-size: 0.74rem; }
+.strip-icon { font-size: 1.15rem; line-height: 1.5; }
+.strip-hi { font-weight: 600; }
+.strip-lo { color: var(--muted); }
+.strip-rain { color: var(--cool); font-size: 0.72rem; min-height: 1em; }
+
+/* Stations that aren't forecasting */
+.idle-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.idle-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 2fr auto;
+  align-items: center;
+  gap: 0.2rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem 1rem;
+}
+.idle-main { display: grid; min-width: 0; }
+.idle-main b { overflow-wrap: anywhere; }
+.idle-why { color: var(--muted); font-size: 0.86rem; }
+@media (max-width: 640px) {
+  .idle-row { grid-template-columns: 1fr auto; }
+  .idle-why { grid-column: 1 / -1; grid-row: 2; }
+}
 .pill.good { background: var(--ok-bg); color: var(--ok); }
 .chip.mine { background: var(--cool-bg); color: var(--cool); }
 .station .reading { align-items: flex-start; }
-.station .wx-facts { text-align: right; color: var(--muted); font-size: 0.85rem; display: grid; gap: 0.15rem; }
+.station .wx-facts { text-align: right; color: var(--muted); font-size: 0.85rem; display: grid; gap: 0.3rem; justify-items: end; }
 .station .wx-facts b { color: var(--text); font-weight: 600; }
 .station .why { color: var(--faint); font-size: 0.88rem; }
 

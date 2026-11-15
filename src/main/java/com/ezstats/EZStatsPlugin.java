@@ -2,7 +2,7 @@ package com.ezstats;
 
 import com.ezstats.account.AccountStore;
 import com.ezstats.account.OwnershipListener;
-import com.ezstats.control.ReadOnlyControl;
+import com.ezstats.control.Controls;
 import com.ezstats.control.ThermostatControl;
 import com.ezstats.link.LinkManager;
 import com.ezstats.snapshot.SnapshotService;
@@ -44,9 +44,10 @@ public final class EZStatsPlugin extends JavaPlugin {
             return;
         }
 
-        // EZvac's API can't change anything yet; see ThermostatControl for where writes plug in.
-        control = new ReadOnlyControl();
         FileConfiguration config = getConfig();
+        // Controlling thermostats needs API 1.12; set once at start, so changing control.enabled needs a restart.
+        control = Controls.create(this, api, config.getBoolean("control.enabled", true),
+                apiAtLeast(api.apiVersion(), 1, 12));
         links = new LinkManager(config.getLong("link.token-ttl-seconds", 300), config.getLong("session.ttl-hours", 72));
         accounts = new AccountStore(new File(getDataFolder(), "accounts.yml"), getLogger());
         accounts.load();
@@ -63,7 +64,7 @@ public final class EZStatsPlugin extends JavaPlugin {
         startWeb();
         getLogger().info("EZStats " + getPluginMeta().getVersion() + " is up with EZvac " + api.pluginVersion()
                 + " (API " + api.apiVersion() + "). The website is "
-                + (control.writable() ? "read and write." : "read-only: EZvac's API can't change thermostats yet."));
+                + (control.writable() ? "read and write." : "read-only. " + control.readOnlyReason()));
     }
 
     @Override

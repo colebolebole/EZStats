@@ -7,19 +7,21 @@ thermostat also shows the weather and seven-day forecast from its nearest weathe
 players can sort their thermostats into folders. A Weather tab shows every weather station and its
 forecast to all signed-in players.
 
-**Read-only for now.** EZvac's public API (through 1.11) can only read; it has no call to set a
-target or switch a system on or off. EZStats is built so that changing thermostats from the
-website is one class away (see [Adding writes](#adding-writes)); until EZvac's API grows write
-methods, changes are made in game and the dashboard says so.
+**Controlling thermostats.** On EZvac BETA 1.0 Pilot 7 or newer (API 1.12), owners can change their
+thermostats from the website: the target, on and off, and the profile. See
+[Controlling thermostats](#controlling-thermostats). On an older EZvac, or with control switched
+off, the website is read-only and says why.
 
 ## Requirements
 
 - Paper (or a fork) 1.21.x, Java 21
 - EZvac BETA 1.0 Pilot 3 or newer (API 1.8). EZStats says so and stays off on an older one.
+  Controlling thermostats from the website needs Pilot 7 or newer (API 1.12); on Pilot 3 to 6 the
+  website works but is read-only.
 
 ## Install
 
-1. Put `EZStats-0.5.0.jar` in `plugins/` next to EZvac.
+1. Put `EZStats-0.6.0.jar` in `plugins/` next to EZvac.
 2. Start the server once, then edit `plugins/EZStats/config.yml`: set `web.public-url` to the
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
@@ -35,9 +37,36 @@ methods, changes are made in game and the dashboard says so.
 
 5. Sort thermostats into folders on the website: click **New folder**, then use the **Folder** menu on
    each thermostat's card.
+6. Change a thermostat: use the **-** and **+** beside its target, the **Switch off** button, or the
+   **Eco / Normal / Turbo** profile.
 
 Don't reuse a password from anywhere else: commands you type can appear in the server's console
 and logs.
+
+## Controlling thermostats
+
+Signed in, an owner can change their own thermostats from the website:
+
+- **Target:** the **-** and **+** step it by one degree in the server's units. EZvac keeps it within
+  the thermostat's range (a pool thermostat's is wider) and the page says when it did.
+- **Power:** **Switch off** and **Switch on** the thermostat's whole system.
+- **Profile:** **Eco**, **Normal** or **Turbo** for its system.
+
+How it works, and what to know:
+
+- **Through EZvac's control API.** Each change acts for the signed-in player, so EZvac shows them as
+  "Last changed by" in `/hvac info`, and EZvac fires its cancellable `DeviceControlEvent` first: a
+  claims plugin that cancels it still stops a change from the website, and the page shows its message.
+- **Only the owner** can change a thermostat. EZvac itself checks nothing, so EZStats does: the website
+  refuses a thermostat that isn't yours before EZvac is asked.
+- **Claiming is first come, first served,** and anyone with `ezstats.use` can claim a thermostat they
+  can see. In game, EZvac already lets anyone with `ezvac.use` click a thermostat's sign to change it,
+  so this adds no new power over a thermostat, only that an owner can use it **from anywhere**, not just
+  standing at the sign. On a server where that matters, an admin can release a claim with
+  `/ezstats disown`, a claims plugin can cancel `DeviceControlEvent`, or `control.enabled: false` in
+  `config.yml` makes the website read-only (restart to apply).
+- **Older EZvac:** below API 1.12, or with `control.enabled: false`, the website is read-only and shows
+  the reason. Everything else works.
 
 ## Weather and forecasts
 
@@ -57,10 +86,18 @@ plus the station's wind and air right now.
 
 ### The Weather tab
 
-The **Weather** tab lists every weather station on the server, grouped by world, with its seven-day
-forecast, wind, air quality and lightning strikes. Stations that aren't forecasting show why: switched
-off by an admin, tower damaged, or not measured yet. A station that is the nearest for one of your
-thermostats says so.
+The **Weather** tab lists every weather station on the server, organised so a long list stays easy
+to scan:
+
+- **Near your thermostats** comes first: the stations that are the nearest for your own thermostats,
+  marked with their names.
+- **The other stations** follow, grouped by world. Each card shows the outside temperature, today's
+  sky, high and low, the station's wind, air quality and lightning strikes, and the seven days side by
+  side (sky, high, low, chance of rain). **Day-by-day details** opens each day's wind, AQI and notes.
+- **Not forecasting** collects the stations that can't forecast, one line each with the reason:
+  switched off by an admin, tower damaged, or not measured yet.
+- **Search, world and status filters** along the top narrow the list: search by station or world
+  name, show one world, or show only forecasting or only not-forecasting stations.
 
 Unlike thermostats, which belong to one player, stations are the server's, so **any signed-in player**
 sees all of them, with their coordinates. Visitors who aren't signed in see nothing. To leave the tab
@@ -113,19 +150,17 @@ the `https://` address, `web.bind` to `127.0.0.1`, and `web.trust-forwarded-for`
 proxy adds `X-Forwarded-For`). Over plain HTTP the password and session cookie cross the network
 unencrypted: use a proxy for anything public.
 
-## Adding writes
+## For developers
 
-`ThermostatControl` is the seam. The web layer already has `POST /api/thermostat/target` and
-`/enabled`, which refuse anyone but the thermostat's owner, and the dashboard draws its buttons
-whenever `writable()` is true. When EZvac's API can change thermostats, implement
-`ThermostatControl` against it (hopping to the main thread) and swap it for `ReadOnlyControl` in
-`EZStatsPlugin.onEnable`.
-
+`ThermostatControl` is how the website changes a thermostat. `EzvacThermostatControl` does it through
+EZvac's `EzvacControl`; `ReadOnlyControl` refuses with a reason. `Controls.create` picks one, and keeps
+the control API's types out of the plugin class so an older EZvac still loads EZStats. The web layer
+checks ownership before it calls either.
 ## Building
 
 ```
 mvn package
 ```
 
-The jar is `target/EZStats-0.5.0.jar`. EZvac's API comes from JitPack and is `provided`: never
+The jar is `target/EZStats-0.6.0.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.

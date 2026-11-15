@@ -63,13 +63,30 @@
       <div id="view-weather" role="tabpanel" aria-labelledby="tab-weather" hidden>
         <div class="page-head">
           <h1>Weather stations</h1>
-          <p class="note">Every weather station on the server and its seven-day forecast. Stations are built by admins in the Overworld.</p>
+          <p id="wx-summary" class="note" hidden></p>
         </div>
+
+        <div id="wx-tools" class="toolbar" hidden>
+          <input id="wx-search" type="search" placeholder="Search stations" aria-label="Search stations" maxlength="64">
+          <select id="wx-world" aria-label="Show one world" hidden></select>
+          <div id="wx-status" class="seg" role="group" aria-label="Show stations">
+            <button type="button" data-status="all" aria-pressed="true">All</button>
+            <button type="button" data-status="working" aria-pressed="false">Forecasting</button>
+            <button type="button" data-status="idle" aria-pressed="false">Not forecasting</button>
+          </div>
+        </div>
+
         <div id="wx-empty" class="empty" hidden>
           <h2>No weather stations yet</h2>
           <p>An admin can build one: see EZvac's weather station guide, then run <code>/hvac create weatherstation</code>.</p>
         </div>
+        <div id="wx-none" class="empty small" hidden>
+          <p>No stations match. Clear the search or filters.</p>
+        </div>
+
+        <div id="wx-near"></div>
         <div id="wx-groups"></div>
+        <div id="wx-idle"></div>
       </div>
 
       <p id="foot" class="foot"></p>
