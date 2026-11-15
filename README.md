@@ -191,3 +191,7 @@ mvn package
 
 The jar is `target/EZStats-0.6.1.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.
+
+## License
+
+EZStats is released under the [MIT License](LICENSE).
