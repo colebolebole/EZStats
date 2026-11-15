@@ -1,0 +1,29 @@
+# EZStats: a web dashboard for EZvac thermostats.
+
+web:
+  # The address the dashboard listens on. 0.0.0.0 is every network interface;
+  # use 127.0.0.1 to listen only to this machine (for example behind a reverse proxy).
+  bind: 0.0.0.0
+  port: 8765
+  # The address players open, as they reach it from outside: it is what
+  # /ezstats link puts in the link, with no trailing slash. For example
+  # https://stats.example.com (behind a proxy) or http://play.example.com:8765.
+  # Left empty, EZStats guesses http://<server-ip>:<port>, which only works if
+  # server.properties has your server's address in server-ip.
+  public-url: ""
+
+link:
+  # How long a /ezstats link link works, and it works once.
+  token-ttl-seconds: 300
+
+session:
+  # How long a linked browser stays signed in. Sessions are kept in memory:
+  # a server restart signs everyone out, and /ezstats link signs them back in.
+  ttl-hours: 72
+
+# How often the dashboard's numbers are read from EZvac, in ticks (20 = every second).
+refresh-ticks: 20
+
+# Every thermostat in every world is shown to anyone linked, as EZvac's own
+# /hvac list does. List a world's name here to keep its thermostats off the website.
+hidden-worlds: []

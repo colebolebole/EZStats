@@ -1,0 +1,19 @@
+name: EZStats
+version: '${project.version}'
+main: com.ezstats.EZStatsPlugin
+api-version: '1.21'
+description: A web dashboard for EZvac thermostats.
+depend: [EZvac]
+commands:
+  ezstats:
+    description: Link your account to the EZStats website and manage it.
+    usage: /ezstats <link|unlink|status|reload>
+    aliases: [ezs]
+    permission: ezstats.use
+permissions:
+  ezstats.use:
+    description: Allows /ezstats link, and so signing in to the website.
+    default: true
+  ezstats.admin:
+    description: Allows /ezstats reload and seeing every linked session in /ezstats status.
+    default: op

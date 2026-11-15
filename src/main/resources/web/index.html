@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EZStats</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="top">
+    <h1>EZStats</h1>
+    <div class="who">
+      <span id="who"></span>
+      <button id="logout" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="unlinked" class="panel" hidden>
+      <h2>Link your Minecraft account</h2>
+      <p>Run <code>/ezstats link</code> in game and open the link it gives you. It works once, for a few minutes.</p>
+    </section>
+
+    <section id="linked" hidden>
+      <div id="notice" class="notice" hidden></div>
+      <div id="worlds" class="worlds"></div>
+      <div id="empty" class="panel" hidden>
+        <p>No thermostats yet. Build one in game with <code>/hvac create thermostat &lt;label&gt;</code>.</p>
+      </div>
+      <div id="grid" class="grid"></div>
+      <p id="foot" class="foot"></p>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
