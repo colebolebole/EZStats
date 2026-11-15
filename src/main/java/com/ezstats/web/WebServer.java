@@ -1,5 +1,8 @@
 package com.ezstats.web;
 
+import com.ezstats.account.AccountStore;
+import com.ezstats.account.LoginLimiter;
+import com.ezstats.account.PasswordHasher;
 import com.ezstats.control.ThermostatControl;
 import com.ezstats.link.LinkManager;
 import com.ezstats.snapshot.SnapshotService;
@@ -15,6 +18,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,7 +29,8 @@ import java.util.logging.Logger;
  *
  * <ul>
  *   <li>{@code GET /link?token=} spends a link token, sets the session cookie and goes to {@code /}</li>
- *   <li>{@code GET /api/state} the latest snapshot, for a linked browser</li>
+ *   <li>{@code POST /api/login} a Minecraft name and the password from {@code /ezstats register}</li>
+ *   <li>{@code GET /api/state} the thermostats the signed-in player owns</li>
  *   <li>{@code POST /api/thermostat/target} and {@code /enabled}, through the {@link ThermostatControl}</li>
  *   <li>{@code POST /api/logout}</li>
  * </ul>
@@ -42,23 +47,33 @@ public final class WebServer {
             "/app.js", new String[]{"web/app.js", "text/javascript; charset=utf-8"},
             "/app.css", new String[]{"web/app.css", "text/css; charset=utf-8"});
 
+    private static final int MAX_USERNAME = 32;
+    private static final int MAX_PASSWORD = 128;
+    private static final int MAX_FAILS_PER_USER = 5;
+    private static final int MAX_FAILS_PER_ADDRESS = 20;
+
     private final Logger log;
     private final LinkManager links;
+    private final AccountStore accounts;
+    private final LoginLimiter limiter = new LoginLimiter();
     private final SnapshotService snapshots;
     private final ThermostatControl control;
     private final boolean secureCookie;
+    private final boolean trustForwardedFor;
     private final Map<String, byte[]> files = new java.util.HashMap<>();
 
     private HttpServer server;
     private ExecutorService executor;
 
-    public WebServer(Logger log, LinkManager links, SnapshotService snapshots, ThermostatControl control,
-                     boolean secureCookie) {
+    public WebServer(Logger log, LinkManager links, AccountStore accounts, SnapshotService snapshots,
+                     ThermostatControl control, boolean secureCookie, boolean trustForwardedFor) {
         this.log = log;
         this.links = links;
+        this.accounts = accounts;
         this.snapshots = snapshots;
         this.control = control;
         this.secureCookie = secureCookie;
+        this.trustForwardedFor = trustForwardedFor;
     }
 
     public void start(String bind, int port) throws IOException {
@@ -103,6 +118,8 @@ public final class WebServer {
                 change(exchange, true);
             } else if (method.equals("POST") && path.equals("/api/thermostat/enabled")) {
                 change(exchange, false);
+            } else if (method.equals("POST") && path.equals("/api/login")) {
+                login(exchange);
             } else if (method.equals("POST") && path.equals("/api/logout")) {
                 logout(exchange);
             } else {
@@ -127,19 +144,115 @@ public final class WebServer {
                     + "Run <code>/ezstats link</code> in game for a new one.</p>").getBytes(StandardCharsets.UTF_8));
             return;
         }
-        exchange.getResponseHeaders().add("Set-Cookie", COOKIE + "=" + session.get()
-                + "; Path=/; HttpOnly; SameSite=Strict" + (secureCookie ? "; Secure" : ""));
+        setSessionCookie(exchange, session.get());
         exchange.getResponseHeaders().add("Location", "/");
         send(exchange, 302, "text/plain", new byte[0]);
+    }
+
+    private void setSessionCookie(HttpExchange exchange, String sessionId) {
+        exchange.getResponseHeaders().add("Set-Cookie", COOKIE + "=" + sessionId
+                + "; Path=/; HttpOnly; SameSite=Strict" + (secureCookie ? "; Secure" : ""));
+    }
+
+    /** Signs in with a Minecraft name and the password set with {@code /ezstats register}. */
+    private void login(HttpExchange exchange) throws IOException {
+        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
+            json(exchange, 403, error("Missing X-EZStats header"));
+            return;
+        }
+        JsonObject body = readBody(exchange);
+        if (body == null) return;
+        String username;
+        String password;
+        try {
+            username = body.get("username").getAsString().trim();
+            password = body.get("password").getAsString();
+        } catch (RuntimeException e) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        if (username.isEmpty() || username.length() > MAX_USERNAME || password.isEmpty()
+                || password.length() > MAX_PASSWORD) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+
+        String ip = clientIp(exchange);
+        String ipKey = "ip:" + ip;
+        String userKey = "user:" + ip + "|" + username.toLowerCase(java.util.Locale.ROOT);
+        if (limiter.locked(ipKey) || limiter.locked(userKey)) {
+            json(exchange, 429, error("Too many tries. Wait a few minutes and try again."));
+            return;
+        }
+
+        // Every path does one PBKDF2 check, with a dummy hash for an unknown name, so timing
+        // doesn't tell a visitor which names have accounts.
+        char[] chars = password.toCharArray();
+        UUID matched = null;
+        String matchedName = null;
+        java.util.List<UUID> candidates = accounts.loginCandidates(username);
+        if (candidates.isEmpty()) {
+            PasswordHasher.verify(chars, null);
+        } else {
+            for (UUID candidate : candidates) {
+                if (PasswordHasher.verify(chars, accounts.passwordHash(candidate))) {
+                    matched = candidate;
+                    matchedName = accounts.name(candidate);
+                    break;
+                }
+            }
+        }
+        java.util.Arrays.fill(chars, '\0');
+
+        if (matched == null) {
+            limiter.failure(ipKey, MAX_FAILS_PER_ADDRESS);
+            limiter.failure(userKey, MAX_FAILS_PER_USER);
+            json(exchange, 401, error("Wrong username or password."));
+            return;
+        }
+        limiter.success(userKey);
+        setSessionCookie(exchange, links.createSession(matched, matchedName));
+        json(exchange, 200, "{\"ok\":true}");
+    }
+
+    private String clientIp(HttpExchange exchange) {
+        if (trustForwardedFor) {
+            // A proxy adds the address it saw to the end of the list; anything before it is the client's claim.
+            String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+            if (forwarded != null && !forwarded.isBlank()) {
+                String[] parts = forwarded.split(",");
+                return parts[parts.length - 1].trim();
+            }
+        }
+        return exchange.getRemoteAddress().getAddress().getHostAddress();
+    }
+
+    /** Reads a small JSON body. Answers the client and returns null when it is too big or not JSON. */
+    private JsonObject readBody(HttpExchange exchange) throws IOException {
+        try {
+            byte[] raw = exchange.getRequestBody().readNBytes(MAX_BODY + 1);
+            if (raw.length > MAX_BODY) {
+                json(exchange, 413, error("Too large"));
+                return null;
+            }
+            JsonObject body = GSON.fromJson(new String(raw, StandardCharsets.UTF_8), JsonObject.class);
+            if (body == null) throw new JsonParseException("empty");
+            return body;
+        } catch (JsonParseException | IllegalStateException | ClassCastException e) {
+            json(exchange, 400, error("Bad request"));
+            return null;
+        }
     }
 
     private void state(HttpExchange exchange) throws IOException {
         Optional<LinkManager.Session> session = session(exchange);
         if (session.isEmpty()) {
-            json(exchange, 401, error("Not linked. Run /ezstats link in game."));
+            json(exchange, 401, error("Not signed in."));
             return;
         }
-        String body = "{\"player\":" + GSON.toJson(session.get().name()) + ",\"state\":" + snapshots.json() + "}";
+        LinkManager.Session who = session.get();
+        String body = "{\"player\":" + GSON.toJson(who.name()) + ",\"state\":"
+                + snapshots.jsonFor(accounts.owned(who.player())) + "}";
         send(exchange, 200, "application/json; charset=utf-8", body.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -154,22 +267,16 @@ public final class WebServer {
             json(exchange, 403, error("Missing X-EZStats header"));
             return;
         }
-        JsonObject body;
-        try {
-            byte[] raw = exchange.getRequestBody().readNBytes(MAX_BODY + 1);
-            if (raw.length > MAX_BODY) {
-                json(exchange, 413, error("Too large"));
-                return;
-            }
-            body = GSON.fromJson(new String(raw, StandardCharsets.UTF_8), JsonObject.class);
-            if (body == null || !body.has("key")) throw new JsonParseException("no key");
-        } catch (JsonParseException | IllegalStateException | ClassCastException e) {
-            json(exchange, 400, error("Bad request"));
-            return;
-        }
+        JsonObject body = readBody(exchange);
+        if (body == null) return;
         ThermostatControl.Result result;
         try {
             String key = body.get("key").getAsString();
+            // Only the owner may change a thermostat, whatever the control behind this can do.
+            if (!accounts.ownerOf(key).equals(Optional.of(session.get().player()))) {
+                json(exchange, 403, error("That thermostat isn't yours. Claim it in game with /ezstats own."));
+                return;
+            }
             result = target
                     ? control.setTarget(session.get().player(), key, body.get("targetF").getAsDouble())
                     : control.setEnabled(session.get().player(), key, body.get("enabled").getAsBoolean());

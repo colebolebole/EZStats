@@ -4,7 +4,6 @@ import com.ezstats.control.ThermostatControl;
 import com.github.blade.hvac.api.EzvacApi;
 import com.github.blade.hvac.api.OutdoorClimate;
 import com.github.blade.hvac.api.Position;
-import com.github.blade.hvac.api.SeasonView;
 import com.github.blade.hvac.api.ThermostatView;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -14,25 +13,29 @@ import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.Collection;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 
 /**
- * Reads EZvac on the main thread every few ticks and keeps the result as a JSON string, so web
- * server threads never touch Bukkit or EZvac: EZvac's API is for the main thread only.
+ * Reads EZvac on the main thread every few ticks and keeps the result, so web server threads never
+ * touch Bukkit or EZvac: EZvac's API is for the main thread only. A web thread asks for the part of
+ * the snapshot a player owns with {@link #jsonFor}.
  */
 public final class SnapshotService {
     private static final Gson GSON = new Gson();
+
+    /** What one read of EZvac found. The JSON objects are never changed after they are built. */
+    private record Snapshot(long generatedAt, String units, boolean writable, String ezvacVersion,
+                            String apiVersion, Map<String, JsonObject> worlds, Map<String, JsonObject> thermostats) {}
 
     private final Plugin plugin;
     private final EzvacApi api;
     private final ThermostatControl control;
 
-    private volatile String json;
-    private volatile Set<String> hiddenWorlds = Set.of();
+    private volatile Snapshot snapshot;
     private BukkitTask task;
     private boolean warned;
 
@@ -40,18 +43,11 @@ public final class SnapshotService {
         this.plugin = plugin;
         this.api = api;
         this.control = control;
-        JsonObject empty = new JsonObject();
-        empty.addProperty("generatedAt", System.currentTimeMillis());
-        empty.addProperty("units", "F");
-        empty.addProperty("writable", control.writable());
-        empty.add("worlds", new JsonArray());
-        empty.add("thermostats", new JsonArray());
-        this.json = GSON.toJson(empty);
+        this.snapshot = new Snapshot(System.currentTimeMillis(), "F", control.writable(), "", "", Map.of(), Map.of());
     }
 
-    public void start(int periodTicks, Collection<String> hidden) {
+    public void start(int periodTicks) {
         stop();
-        setHiddenWorlds(hidden);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::refresh, 1L, Math.max(5, periodTicks));
     }
 
@@ -60,20 +56,40 @@ public final class SnapshotService {
         task = null;
     }
 
-    public void setHiddenWorlds(Collection<String> names) {
-        Set<String> lower = new HashSet<>();
-        for (String name : names) lower.add(name.toLowerCase(Locale.ROOT));
-        hiddenWorlds = Set.copyOf(lower);
-    }
+    /**
+     * The snapshot as JSON, with only the thermostats whose keys are given (and the worlds they are in).
+     * Safe from any thread.
+     */
+    public String jsonFor(Set<String> ownedKeys) {
+        Snapshot snap = snapshot;
+        JsonObject root = new JsonObject();
+        root.addProperty("generatedAt", snap.generatedAt());
+        root.addProperty("units", snap.units());
+        root.addProperty("writable", snap.writable());
+        root.addProperty("ezvacVersion", snap.ezvacVersion());
+        root.addProperty("apiVersion", snap.apiVersion());
 
-    /** The latest snapshot. Safe from any thread. */
-    public String json() {
-        return json;
+        JsonArray thermostats = new JsonArray();
+        Set<String> worldNames = new java.util.LinkedHashSet<>();
+        for (String key : ownedKeys) {
+            JsonObject thermostat = snap.thermostats().get(key);
+            if (thermostat == null) continue;
+            thermostats.add(thermostat);
+            worldNames.add(thermostat.get("world").getAsString());
+        }
+        JsonArray worlds = new JsonArray();
+        for (String name : worldNames) {
+            JsonObject world = snap.worlds().get(name);
+            if (world != null) worlds.add(world);
+        }
+        root.add("worlds", worlds);
+        root.add("thermostats", thermostats);
+        return GSON.toJson(root);
     }
 
     private void refresh() {
         try {
-            json = GSON.toJson(build());
+            snapshot = build();
             warned = false;
         } catch (RuntimeException e) {
             // Keep serving the last good snapshot; say so once, not twenty times a second.
@@ -82,25 +98,17 @@ public final class SnapshotService {
         }
     }
 
-    private JsonObject build() {
-        JsonObject root = new JsonObject();
-        root.addProperty("generatedAt", System.currentTimeMillis());
-        root.addProperty("units", api.units().name());
-        root.addProperty("writable", control.writable());
-        root.addProperty("ezvacVersion", api.pluginVersion());
-        root.addProperty("apiVersion", api.apiVersion());
-
-        JsonArray worlds = new JsonArray();
-        JsonArray thermostats = new JsonArray();
+    private Snapshot build() {
+        Map<String, JsonObject> worlds = new LinkedHashMap<>();
+        Map<String, JsonObject> thermostats = new LinkedHashMap<>();
         for (World world : Bukkit.getWorlds()) {
-            if (hiddenWorlds.contains(world.getName().toLowerCase(Locale.ROOT))) continue;
-            Collection<ThermostatView> views = api.thermostats(world);
-            worlds.add(worldJson(world));
-            for (ThermostatView view : views) thermostats.add(thermostatJson(world, view));
+            worlds.put(world.getName(), worldJson(world));
+            for (ThermostatView view : api.thermostats(world)) {
+                thermostats.put(key(view.position()), thermostatJson(world, view));
+            }
         }
-        root.add("worlds", worlds);
-        root.add("thermostats", thermostats);
-        return root;
+        return new Snapshot(System.currentTimeMillis(), api.units().name(), control.writable(),
+                api.pluginVersion(), api.apiVersion(), worlds, thermostats);
     }
 
     private JsonObject worldJson(World world) {
@@ -155,7 +163,7 @@ public final class SnapshotService {
         return out;
     }
 
-    /** A thermostat's key on the website: its world and block. Labels can repeat, so they can't be keys. */
+    /** A thermostat's key: its world and block. Labels can repeat, so they can't be keys. */
     public static String key(Position position) {
         return position.world() + ":" + position.x() + ":" + position.y() + ":" + position.z();
     }

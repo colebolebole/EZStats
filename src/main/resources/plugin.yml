@@ -6,14 +6,14 @@ description: A web dashboard for EZvac thermostats.
 depend: [EZvac]
 commands:
   ezstats:
-    description: Link your account to the EZStats website and manage it.
-    usage: /ezstats <link|unlink|status|reload>
+    description: Register a website account, claim thermostats, and sign in to the EZStats website.
+    usage: /ezstats <register|password|own|disown|link|unlink|status|reload>
     aliases: [ezs]
     permission: ezstats.use
 permissions:
   ezstats.use:
-    description: Allows /ezstats link, and so signing in to the website.
+    description: Allows /ezstats register, own, link and the rest of the player commands.
     default: true
   ezstats.admin:
-    description: Allows /ezstats reload and seeing every linked session in /ezstats status.
+    description: Allows /ezstats reload, and /ezstats disown on thermostats owned by others.
     default: op

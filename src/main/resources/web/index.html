@@ -17,15 +17,25 @@
 
   <main>
     <section id="unlinked" class="panel" hidden>
-      <h2>Link your Minecraft account</h2>
-      <p>Run <code>/ezstats link</code> in game and open the link it gives you. It works once, for a few minutes.</p>
+      <h2>Sign in</h2>
+      <form id="login" autocomplete="on">
+        <label for="username">Minecraft name</label>
+        <input id="username" name="username" type="text" autocomplete="username" maxlength="32" required>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+        <p id="login-error" class="error" role="alert" hidden></p>
+        <button id="login-submit" type="submit" class="primary">Sign in</button>
+      </form>
+      <p class="hint">No password yet? In game, run <code>/ezstats register &lt;password&gt;</code>.
+        Or run <code>/ezstats link</code> and open the one-time link it gives you.</p>
     </section>
 
     <section id="linked" hidden>
       <div id="notice" class="notice" hidden></div>
       <div id="worlds" class="worlds"></div>
       <div id="empty" class="panel" hidden>
-        <p>No thermostats yet. Build one in game with <code>/hvac create thermostat &lt;label&gt;</code>.</p>
+        <h2>No thermostats yet</h2>
+        <p>Look at a thermostat's sign in game and run <code>/ezstats own</code> to add it to your account.</p>
       </div>
       <div id="grid" class="grid"></div>
       <p id="foot" class="foot"></p>

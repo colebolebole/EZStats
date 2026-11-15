@@ -11,6 +11,10 @@ web:
   # Left empty, EZStats guesses http://<server-ip>:<port>, which only works if
   # server.properties has your server's address in server-ip.
   public-url: ""
+  # Turn on only behind a reverse proxy that adds X-Forwarded-For. It makes the
+  # login limiter tell visitors apart by their real address instead of the
+  # proxy's; with no proxy, a visitor could fake it to dodge the limiter.
+  trust-forwarded-for: false
 
 link:
   # How long a /ezstats link link works, and it works once.
@@ -23,7 +27,3 @@ session:
 
 # How often the dashboard's numbers are read from EZvac, in ticks (20 = every second).
 refresh-ticks: 20
-
-# Every thermostat in every world is shown to anyone linked, as EZvac's own
-# /hvac list does. List a world's name here to keep its thermostats off the website.
-hidden-worlds: []

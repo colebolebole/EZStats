@@ -1,5 +1,7 @@
 package com.ezstats;
 
+import com.ezstats.account.AccountStore;
+import com.ezstats.account.OwnershipListener;
 import com.ezstats.control.ReadOnlyControl;
 import com.ezstats.control.ThermostatControl;
 import com.ezstats.link.LinkManager;
@@ -11,10 +13,12 @@ import org.bukkit.command.PluginCommand;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.File;
 import java.io.IOException;
 
 public final class EZStatsPlugin extends JavaPlugin {
     private ThermostatControl control;
+    private AccountStore accounts;
     private LinkManager links;
     private SnapshotService snapshots;
     private WebServer web;
@@ -38,8 +42,11 @@ public final class EZStatsPlugin extends JavaPlugin {
         FileConfiguration config = getConfig();
         links = new LinkManager(config.getLong("link.token-ttl-seconds", 300), config.getLong("session.ttl-hours", 72));
         snapshots = new SnapshotService(this, api, control);
+        accounts = new AccountStore(new File(getDataFolder(), "accounts.yml"), getLogger());
+        accounts.load();
+        getServer().getPluginManager().registerEvents(new OwnershipListener(accounts), this);
 
-        EZStatsCommand command = new EZStatsCommand(this, links);
+        EZStatsCommand command = new EZStatsCommand(this, api, links, accounts);
         PluginCommand registered = getCommand("ezstats");
         if (registered != null) {
             registered.setExecutor(command);
@@ -71,8 +78,9 @@ public final class EZStatsPlugin extends JavaPlugin {
         int port = config.getInt("web.port", 8765);
         publicUrl = resolvePublicUrl(config.getString("web.public-url", ""), port);
 
-        snapshots.start(config.getInt("refresh-ticks", 20), config.getStringList("hidden-worlds"));
-        web = new WebServer(getLogger(), links, snapshots, control, publicUrl.startsWith("https://"));
+        snapshots.start(config.getInt("refresh-ticks", 20));
+        web = new WebServer(getLogger(), links, accounts, snapshots, control, publicUrl.startsWith("https://"),
+                config.getBoolean("web.trust-forwarded-for", false));
         try {
             web.start(bind, port);
             getLogger().info("Website listening on " + bind + ":" + port + "; links point at " + publicUrl);

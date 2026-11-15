@@ -88,6 +88,29 @@ code {
 }
 .panel h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
 
+#login { display: grid; gap: 0.35rem; }
+#login label { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  width: 100%;
+}
+input:focus-visible { outline: 2px solid var(--cool); outline-offset: 1px; }
+button.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  margin-top: 0.7rem;
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+}
+.error { color: var(--heat); font-size: 0.9rem; margin: 0.3rem 0 0; }
+.hint { color: var(--muted); font-size: 0.88rem; margin: 1rem 0 0; }
+
 .notice {
   background: var(--warn-bg);
   color: var(--warn);

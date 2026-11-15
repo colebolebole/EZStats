@@ -185,6 +185,24 @@ async function refresh() {
   }
 }
 
+$("login").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("login-error");
+  const submit = $("login-submit");
+  error.hidden = true;
+  submit.disabled = true;
+  try {
+    await post("/api/login", { username: $("username").value.trim(), password: $("password").value });
+    $("password").value = "";
+    await refresh();
+  } catch (e) {
+    error.textContent = e.message;
+    error.hidden = false;
+  } finally {
+    submit.disabled = false;
+  }
+});
+
 $("logout").addEventListener("click", async () => {
   try { await post("/api/logout", {}); } catch (_) { /* signed out or not, show the link page */ }
   lastKey = "";

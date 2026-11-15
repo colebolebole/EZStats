@@ -48,10 +48,15 @@ public final class LinkManager {
         if (token == null) return Optional.empty();
         Pending pending = tokens.remove(token);
         if (pending == null || pending.expiresAtMillis() < System.currentTimeMillis()) return Optional.empty();
+        return Optional.of(createSession(pending.player(), pending.name()));
+    }
+
+    /** A browser session for a player who proved who they are: with a link token or a password. */
+    public String createSession(UUID player, String name) {
+        purge();
         String id = newSecret();
-        sessions.put(id, new Session(pending.player(), pending.name(),
-                System.currentTimeMillis() + sessionTtlMillis));
-        return Optional.of(id);
+        sessions.put(id, new Session(player, name, System.currentTimeMillis() + sessionTtlMillis));
+        return id;
     }
 
     public Optional<Session> session(String id) {
