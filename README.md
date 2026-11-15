@@ -179,6 +179,8 @@ unencrypted: use a proxy for anything public.
 
 ## For developers
 
+The website's JSON API, with every route, request and response and a curl example, is documented in [docs/api.md](docs/api.md).
+
 `DeviceControl` is how the website changes a device. `EzvacDeviceControl` does it through
 EZvac's `EzvacControl`; `ReadOnlyControl` refuses with a reason. `Controls.create` picks one, and keeps
 the control API's types out of the plugin class so an older EZvac still loads EZStats. The web layer

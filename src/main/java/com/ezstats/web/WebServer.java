@@ -26,16 +26,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 /**
- * The website: the dashboard's three static files and a small JSON API.
+ * The website: the dashboard's static files and a small JSON API. The API is documented, with every
+ * request and response, in {@code docs/api.md}.
  *
  * <ul>
  *   <li>{@code GET /link?token=} spends a link token, sets the session cookie and goes to {@code /}</li>
  *   <li>{@code POST /api/login} a Minecraft name and the password from {@code /ezstats register}</li>
- *   <li>{@code GET /api/state} the devices the signed-in player owns</li>
+ *   <li>{@code POST /api/logout}</li>
+ *   <li>{@code GET /api/state} the devices, homes and nearest weather stations of the signed-in player</li>
+ *   <li>{@code GET /api/weather} every weather station and its forecast</li>
  *   <li>{@code POST /api/device/control} changes a device, through the {@link DeviceControl}</li>
  *   <li>{@code POST /api/device/nickname}, {@code /api/device/home} and {@code /api/homes...} are the owner's own data</li>
- *   <li>{@code POST /api/logout}</li>
  * </ul>
+ *
+ * <p>Every {@code POST} needs the header {@code X-EZStats} and a JSON body of at most 4096 bytes. Keep
+ * {@code docs/api.md} in step when a route, a field or a status code changes.
  */
 public final class WebServer {
     static final String COOKIE = "ezstats_session";
@@ -374,6 +379,7 @@ public final class WebServer {
         if (value == null || !Double.isFinite(value) || value != Math.rint(value) || Math.abs(value) > 10_000) return null;
         return (int) Math.rint(value);
     }
+
     /** A number field of a body, or null when it is missing or not a number. */
     private static Double number(JsonObject body, String field) {
         try {
