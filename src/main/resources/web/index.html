@@ -19,7 +19,7 @@
     <!-- Signed out -->
     <section id="unlinked" class="signin" hidden>
       <form id="login" class="card form" autocomplete="on">
-        <h1>Sign in</h1>
+        <h1 id="login-title">Sign in</h1>
         <div id="login-mode" class="seg" role="group" aria-label="How to sign in">
           <button type="button" data-mode="password" aria-pressed="true">Password</button>
           <button type="button" data-mode="quick" aria-pressed="false">QuickLogin</button>
@@ -31,16 +31,26 @@
           <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
         </div>
         <div id="field-code" class="field" hidden>
-          <label for="code">QuickLogin code</label>
+          <label id="code-label" for="code">QuickLogin code</label>
           <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12"
                  placeholder="1234 5678" spellcheck="false" class="code-input">
         </div>
+        <div id="field-new" class="field" hidden>
+          <label for="new-password">New password</label>
+          <input id="new-password" name="new-password" type="password" autocomplete="new-password" minlength="8" maxlength="128">
+          <label for="new-password2">New password again</label>
+          <input id="new-password2" name="new-password2" type="password" autocomplete="new-password" minlength="8" maxlength="128">
+        </div>
         <p id="login-error" class="error" role="alert" hidden></p>
         <button id="login-submit" type="submit" class="primary">Sign in</button>
+        <button id="login-switch" type="button" class="link">Forgot password?</button>
         <p id="hint-password" class="hint">No password yet? In game, run <code>/ezstats register &lt;password&gt;</code>,
           or use QuickLogin.</p>
         <p id="hint-code" class="hint" hidden>In game, run <code>/ezstats quicklogin</code>. It sends you an
           8 digit code that works once, for a few minutes. Don't share it.</p>
+        <p id="hint-reset" class="hint" hidden>In game, run <code>/ezstats resetpassword</code>. It sends you an
+          8 digit code: type it here with a new password (8 to 128 characters, no spaces). Your new password
+          never goes in chat. Every browser you had signed in is signed out.</p>
       </form>
     </section>
 

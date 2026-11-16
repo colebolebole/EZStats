@@ -7,7 +7,7 @@ depend: [EZvac]
 commands:
   ezstats:
     description: Register a website account, claim thermostats, and sign in to the EZStats website.
-    usage: /ezstats <register|password|own|nick|disown|quicklogin|unlink|status|reload>
+    usage: /ezstats <register|password|own|nick|disown|quicklogin|resetpassword|unlink|status|reload>
     aliases: [ezs]
     permission: ezstats.use
 permissions:

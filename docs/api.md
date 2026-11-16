@@ -13,7 +13,7 @@ is built in [`SnapshotService.java`](../src/main/java/com/ezstats/snapshot/Snaps
 [`DeviceJson.java`](../src/main/java/com/ezstats/snapshot/DeviceJson.java).
 
 - [Conventions](#conventions)
-- [Signing in](#signing-in): [`POST /api/quicklogin`](#post-apiquicklogin), [`POST /api/login`](#post-apilogin), [`POST /api/logout`](#post-apilogout)
+- [Signing in](#signing-in): [`POST /api/quicklogin`](#post-apiquicklogin), [`POST /api/reset-password`](#post-apireset-password), [`POST /api/login`](#post-apilogin), [`POST /api/logout`](#post-apilogout)
 - [Reading](#reading): [`GET /api/state`](#get-apistate), [`GET /api/weather`](#get-apiweather)
 - [Changing devices](#changing-devices): [`POST /api/device/control`](#post-apidevicecontrol)
 - [Your own data](#your-own-data): [nicknames](#post-apidevicenickname), [homes](#homes)
@@ -69,6 +69,26 @@ sent the player in chat. No password needed.
 
 A code works once, for `quicklogin.ttl-seconds` (5 minutes by default), and is destroyed after five wrong
 guesses. The old `GET /link` route, which spent a link in a URL, is gone.
+
+### `POST /api/reset-password`
+
+Sets a new password with a Minecraft name and the eight digit code that `/ezstats resetpassword` sent the
+player in chat, so the password is typed into the website and never into Minecraft. It also works for a
+player who has no password yet.
+
+```json
+{ "username": "Steve", "code": "1234 5678", "password": "a-new-password" }
+```
+
+- `password` is 8 to 128 characters with no whitespace. It is checked **before** the code is spent, so a
+  typo doesn't cost the player their code.
+- A reset code is good only for this route, and a QuickLogin code only for `/api/quicklogin`.
+- **`200`** `{"ok":true}` with `Set-Cookie: ezstats_session=...`. Every other session of the player is ended,
+  and the response signs in the caller.
+- **`401`** `{"error":"That code didn't work. Run /ezstats resetpassword in game for a new one."}` for any
+  failure of the code, the same answer in each case.
+- **`429`** after too many wrong tries (shared with sign-in); **`400`** for a missing field, a code that isn't
+  eight digits, or a password that is too short, too long or has spaces.
 
 ### `POST /api/login`
 
@@ -349,7 +369,10 @@ Anything else that isn't an API path is `404`.
 
 ## Limits and security
 
-- **Passwords** are stored as salted PBKDF2-HMAC-SHA256 hashes in `accounts.yml`.
+- **Passwords** are never stored, only salted PBKDF2-HMAC-SHA256 hashes (600,000 iterations, a random
+  16 byte salt each, constant-time compare) in `accounts.yml`, which on POSIX systems is readable only by the
+  server's user. A hash made with fewer iterations by an older release still verifies and is replaced by a
+  stronger one at the owner's next sign-in. Passwords are limited to 128 characters.
 - **QuickLogin codes** are eight random digits from a `SecureRandom`, held in memory as a keyed hash
   (HMAC-SHA-256, compared in constant time), never the digits. A player has one at a time (asking again
   cancels the first, and no more than once in 10 seconds), it works once, expires, and is **destroyed after

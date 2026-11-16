@@ -48,7 +48,8 @@ become homes, and what you owned stays yours.
 6. Change a device: drag the dial of a thermostat, or use the buttons and menus on a device's card.
 
 Don't reuse a password from anywhere else: commands you type can appear in the server's console
-and logs.
+and logs. To keep a password out of the console altogether, skip `register` and use
+**`/ezstats resetpassword`** instead: it gives you a code, and you choose the password on the website.
 
 ## Homes
 
@@ -164,6 +165,7 @@ off, set `weather-tab.enabled: false` in `config.yml`.
 | `/ezstats own system` | `ezstats.use` | Claims the device you're looking at and every device of its system: the thermostat, its equipment, vents, panels and monitors |
 | `/ezstats nick [nickname]` (or `rename`) | `ezstats.use` | Names the device you're looking at, up to 32 characters, on your EZStats page. With no nickname it goes back to its own name. The sign itself is unchanged: EZvac's API can't rename, and `/hvac rename` does that |
 | `/ezstats disown` | `ezstats.use` | Lets go of the device you're looking at. Admins can free anyone's |
+| `/ezstats resetpassword` (or `reset`) | `ezstats.use` | Sends you an 8 digit code in chat; enter it with a new password on the website's **Forgot password?** form. The new password never goes in chat or the console |
 | `/ezstats quicklogin` (or `ql`) | `ezstats.use` | **QuickLogin:** sends you an 8 digit one-time code in chat that signs your browser in, no password. `otp`, `code` and the old `link` still work |
 | `/ezstats unlink` | `ezstats.use` | Signs every browser of yours out |
 | `/ezstats status` | `ezstats.use` | The website's address, your password and devices, who is signed in (admins) |
@@ -181,9 +183,21 @@ starts unowned, and the nickname and home go with it. A nickname belongs to the 
 
 ## How sign-in works
 
-- **Password:** passwords are stored as salted PBKDF2-HMAC-SHA256 hashes in
-  `plugins/EZStats/accounts.yml`, along with who owns what. Wrong guesses are limited: 5 per
-  address and username, 20 per address, then a 5-minute wait.
+- **Password:** a password is never stored, only a hash of it: PBKDF2-HMAC-SHA256 with **600,000
+  iterations** (OWASP's advice) and a random 16 byte salt for each password, compared in constant time.
+  Hashes live in `plugins/EZStats/accounts.yml`, along with who owns what; on Linux and macOS that file
+  is readable only by the user running the server. Each hash records its own iteration count, so a hash
+  made by an older EZStats (210,000 iterations) still works and is quietly replaced by a stronger one the
+  next time its owner signs in. Wrong guesses are limited: 5 per address and username, 20 per address,
+  then a 5-minute wait. Passwords are 8 to 128 characters, so nobody can make the server hash a huge one.
+  The password is never logged. The one place it can be seen is the server console, if you type it into
+  `/ezstats register`: that is what the reset below avoids.
+- **Password reset:** `/ezstats resetpassword` sends *you* an 8 digit code in chat. On the website,
+  choose **Forgot password?**, type your name, the code and a new password (twice). The new password
+  goes straight from your browser to the server, and is never typed into Minecraft, so it can't land in
+  the console log. It also works if you never made a password. The code follows the same rules as a
+  QuickLogin code (below), but is only good for a reset and a QuickLogin code is only good for signing
+  in. A reset signs every browser of yours out and signs in the one that did it.
 - **QuickLogin:** `/ezstats quicklogin` sends *you* (in chat, nobody else) an 8 digit code. Type it on
   the website with your Minecraft name and you are signed in, no password. Eight digits are few, so
   it is protected by more than its length:

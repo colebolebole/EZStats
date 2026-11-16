@@ -33,7 +33,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
-/** {@code /ezstats register | password | own | nick | disown | quicklogin | unlink | status | reload}. */
+/** {@code /ezstats register | password | own | nick | disown | quicklogin | resetpassword | unlink | status | reload}. */
 final class EZStatsCommand implements CommandExecutor, TabCompleter {
     private static final int MIN_PASSWORD = 8;
     private static final int MAX_PASSWORD = 128;
@@ -60,7 +60,8 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
             case "own" -> own(sender, args);
             case "disown" -> disown(sender);
             case "nick", "rename" -> nick(sender, args);
-            case "quicklogin", "ql", "otp", "code", "link" -> quickLogin(sender); // "link" is what it was called before QuickLogin
+            case "quicklogin", "ql", "otp", "code", "link" -> sendCode(sender, LinkManager.Purpose.LOGIN); // "link" is what it was called before QuickLogin
+            case "resetpassword", "reset", "forgot" -> sendCode(sender, LinkManager.Purpose.RESET);
             case "unlink" -> unlink(sender);
             case "status" -> status(sender);
             case "reload" -> reload(sender);
@@ -266,10 +267,13 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     // --- sign-in ---------------------------------------------------------------------------
 
     /**
-     * {@code /ezstats quicklogin}: an eight digit one-time code, sent only to the player who asked, in chat. The
-     * code is never written to the console or a log, and the command line itself holds nothing secret.
+     * {@code /ezstats quicklogin} and {@code /ezstats resetpassword}: an eight digit one-time code, sent only
+     * to the player who asked, in chat. The code is never written to the console or a log, and the command
+     * line itself holds nothing secret (which is the point of resetting a password on the website: the
+     * new one is never typed into chat, where the console could log it).
      */
-    private void quickLogin(CommandSender sender) {
+    private void sendCode(CommandSender sender, LinkManager.Purpose purpose) {
+        boolean reset = purpose == LinkManager.Purpose.RESET;
         Player player = playerOnly(sender, "Only a player can ask for a code: the website signs in as your Minecraft account.");
         if (player == null) return;
         if (!plugin.webRunning()) {
@@ -277,9 +281,9 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
             return;
         }
         accounts.touch(player.getUniqueId(), player.getName());
-        Optional<String> issued = links.issueCode(player.getUniqueId(), player.getName());
+        Optional<String> issued = links.issueCode(purpose, player.getUniqueId(), player.getName());
         if (issued.isEmpty()) {
-            say(player, "Wait " + links.secondsUntilNextCode(player.getUniqueId())
+            say(player, "Wait " + links.secondsUntilNextCode(purpose, player.getUniqueId())
                     + " seconds before asking for another code. The one you have still works.", NamedTextColor.YELLOW);
             return;
         }
@@ -287,21 +291,25 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         String shown = code.substring(0, 4) + " " + code.substring(4);
         long minutes = Math.max(1, links.codeTtlSeconds() / 60);
 
-        player.sendMessage(Component.text("Your QuickLogin code: ", NamedTextColor.GREEN)
+        player.sendMessage(Component.text(reset ? "Your password reset code: " : "Your QuickLogin code: ", NamedTextColor.GREEN)
                 .append(Component.text(shown, NamedTextColor.WHITE, TextDecoration.BOLD)
                         .clickEvent(ClickEvent.copyToClipboard(code))
                         .hoverEvent(HoverEvent.showText(Component.text("Click to copy"))))
                 .append(Component.text("  [copy]", NamedTextColor.AQUA)
                         .clickEvent(ClickEvent.copyToClipboard(code))
                         .hoverEvent(HoverEvent.showText(Component.text("Click to copy")))));
-        player.sendMessage(Component.text("Type it with your Minecraft name at ", NamedTextColor.GRAY)
+        player.sendMessage(Component.text(reset
+                        ? "Open the \"Forgot password\" tab at "
+                        : "Type it with your Minecraft name at ", NamedTextColor.GRAY)
                 .append(Component.text(plugin.publicUrl(), NamedTextColor.AQUA, TextDecoration.UNDERLINED)
                         .clickEvent(ClickEvent.openUrl(plugin.publicUrl()))
-                        .hoverEvent(HoverEvent.showText(Component.text("Opens the EZStats website")))));
+                        .hoverEvent(HoverEvent.showText(Component.text("Opens the EZStats website"))))
+                .append(Component.text(reset ? ", type this code and choose a new password there." : "", NamedTextColor.GRAY)));
         say(player, "It works once, for " + minutes + (minutes == 1 ? " minute" : " minutes") + ", and stops after "
                 + LinkManager.MAX_WRONG_GUESSES + " wrong guesses. Never give it to anyone: no one needs it but you. "
-                + "/ezstats unlink signs every browser out.", NamedTextColor.GRAY);
-        if (!plugin.control().writable()) {
+                + (reset ? "Resetting signs every browser of yours out. Don't type the new password in chat."
+                        : "/ezstats unlink signs every browser out."), NamedTextColor.GRAY);
+        if (!reset && !plugin.control().writable()) {
             say(player, "The website is read-only. " + plugin.control().readOnlyReason(), NamedTextColor.GRAY);
         }
     }
@@ -357,6 +365,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         line(sender, label, "nick [nickname]", "name the device you're looking at (none clears it)");
         line(sender, label, "disown", "let go of the device you're looking at");
         line(sender, label, "password <new>", "change your password");
+        line(sender, label, "resetpassword", "get a code to set a new password on the website (it never goes in chat)");
         line(sender, label, "quicklogin", "get an 8 digit QuickLogin code that signs you in, no password");
         line(sender, label, "unlink", "sign every browser of yours out");
         line(sender, label, "status", "the website's address and who is signed in");
@@ -383,7 +392,7 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length != 1) return List.of();
-        List<String> options = new ArrayList<>(List.of("register", "own", "nick", "rename", "disown", "password", "quicklogin", "unlink", "status"));
+        List<String> options = new ArrayList<>(List.of("register", "own", "nick", "rename", "disown", "password", "resetpassword", "quicklogin", "unlink", "status"));
         if (sender.hasPermission("ezstats.admin")) options.add("reload");
         String prefix = args[0].toLowerCase(Locale.ROOT);
         return options.stream().filter(option -> option.startsWith(prefix)).toList();

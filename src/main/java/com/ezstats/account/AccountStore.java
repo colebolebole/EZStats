@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -321,6 +322,16 @@ public final class AccountStore {
             File parent = file.getParentFile();
             if (parent != null) Files.createDirectories(parent.toPath());
             File temp = new File(file.getPath() + ".tmp");
+            // The file holds password hashes: only the server's user may read it. The temporary file is made
+            // private before anything is written, and it replaces accounts.yml, so that stays private too.
+            // (Windows has no POSIX permissions; there the folder's own access rules apply.)
+            Files.deleteIfExists(temp.toPath());
+            try {
+                Files.createFile(temp.toPath(),
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+            } catch (UnsupportedOperationException ignored) {
+                // not a POSIX file system
+            }
             yaml.save(temp);
             try {
                 Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,

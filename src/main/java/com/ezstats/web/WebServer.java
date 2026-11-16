@@ -32,6 +32,7 @@ import java.util.logging.Logger;
  * <ul>
  *   <li>{@code POST /api/login} a Minecraft name and the password from {@code /ezstats register}</li>
  *   <li>{@code POST /api/quicklogin} a Minecraft name and the eight digit code from {@code /ezstats quicklogin}</li>
+ *   <li>{@code POST /api/reset-password} a name, the code from {@code /ezstats resetpassword} and a new password</li>
  *   <li>{@code POST /api/logout}</li>
  *   <li>{@code GET /api/state} the devices, homes and nearest weather stations of the signed-in player</li>
  *   <li>{@code GET /api/weather} every weather station and its forecast</li>
@@ -57,6 +58,7 @@ public final class WebServer {
             "/devices.js", new String[]{"web/devices.js", "text/javascript; charset=utf-8"});
 
     private static final int MAX_USERNAME = 32;
+    private static final int MIN_PASSWORD = 8;
     private static final int MAX_PASSWORD = 128;
     private static final int MAX_CODE_INPUT = 32; // room for spaces and dashes around eight digits
     private static final int MAX_FAILS_PER_USER = 5;
@@ -143,6 +145,8 @@ public final class WebServer {
                 login(exchange);
             } else if (method.equals("POST") && path.equals("/api/quicklogin")) {
                 quickLogin(exchange);
+            } else if (method.equals("POST") && path.equals("/api/reset-password")) {
+                resetPassword(exchange);
             } else if (method.equals("POST") && path.equals("/api/logout")) {
                 logout(exchange);
             } else {
@@ -208,6 +212,74 @@ public final class WebServer {
         json(exchange, 200, "{\"ok\":true}");
     }
 
+    /**
+     * Sets a new password with a Minecraft name and the eight digit code {@code /ezstats resetpassword} gave in
+     * chat, so the password is typed into the website and never into chat or the console. It also works for a
+     * player who has no password yet. A QuickLogin code is no use here, nor this one for QuickLogin. A reset
+     * signs every browser of the player out, and signs in the one that did it. Limits and failures are as
+     * for {@link #quickLogin}; a password that is too short is refused before the code is spent.
+     */
+    private void resetPassword(HttpExchange exchange) throws IOException {
+        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
+            json(exchange, 403, error("Missing X-EZStats header"));
+            return;
+        }
+        JsonObject body = readBody(exchange);
+        if (body == null) return;
+        String username;
+        String code;
+        String password;
+        try {
+            username = body.get("username").getAsString().trim();
+            code = body.get("code").getAsString();
+            password = body.get("password").getAsString();
+        } catch (RuntimeException e) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        if (username.isEmpty() || username.length() > MAX_USERNAME || code.length() > MAX_CODE_INPUT
+                || password.length() > MAX_PASSWORD) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        code = code.replaceAll("[\\s-]", "");
+        if (!code.matches("[0-9]{" + LinkManager.CODE_DIGITS + "}")) {
+            json(exchange, 400, error("The code is " + LinkManager.CODE_DIGITS + " digits."));
+            return;
+        }
+        // Checked before the code is spent, so a typo in the new password doesn't cost the player their code.
+        if (password.length() < MIN_PASSWORD || password.matches(".*\\s.*")) {
+            json(exchange, 400, error("A password is " + MIN_PASSWORD + " to " + MAX_PASSWORD
+                    + " characters, with no spaces."));
+            return;
+        }
+
+        String ip = clientIp(exchange);
+        String ipKey = "ip:" + ip;
+        String userKey = "user:" + ip + "|" + username.toLowerCase(java.util.Locale.ROOT);
+        if (limiter.locked(ipKey) || limiter.locked(userKey)) {
+            json(exchange, 429, error("Too many tries. Wait a few minutes and try again."));
+            return;
+        }
+
+        Optional<LinkManager.Verified> who = links.redeemCode(LinkManager.Purpose.RESET, username, code);
+        if (who.isEmpty()) {
+            limiter.failure(ipKey, MAX_FAILS_PER_ADDRESS);
+            limiter.failure(userKey, MAX_FAILS_PER_USER);
+            json(exchange, 401, error("That code didn't work. Run /ezstats resetpassword in game for a new one."));
+            return;
+        }
+        limiter.success(userKey);
+        char[] chars = password.toCharArray();
+        String hash = PasswordHasher.hash(chars);
+        java.util.Arrays.fill(chars, '\0');
+        accounts.setPassword(who.get().player(), who.get().name(), hash);
+        links.revoke(who.get().player());
+        setSessionCookie(exchange, links.createSession(who.get().player(), who.get().name()));
+        log.info("Password reset for " + who.get().name() + " with a code from the game.");
+        json(exchange, 200, "{\"ok\":true}");
+    }
+
     private void setSessionCookie(HttpExchange exchange, String sessionId) {
         exchange.getResponseHeaders().add("Set-Cookie", COOKIE + "=" + sessionId
                 + "; Path=/; HttpOnly; SameSite=Strict" + (secureCookie ? "; Secure" : ""));
@@ -260,6 +332,10 @@ public final class WebServer {
                     break;
                 }
             }
+        }
+        // A hash made with fewer iterations than today's is stored again, stronger, now the password is known.
+        if (matched != null && PasswordHasher.needsRehash(accounts.passwordHash(matched))) {
+            accounts.setPassword(matched, matchedName, PasswordHasher.hash(chars));
         }
         java.util.Arrays.fill(chars, '\0');
 

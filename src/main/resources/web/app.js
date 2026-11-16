@@ -895,27 +895,39 @@ for (const button of document.querySelectorAll("#wx-status button")) {
 }
 setInterval(loadWeather, WX_POLL_MS);
 
-// Sign in with a password, or with the 8 digit QuickLogin code from /ezstats quicklogin.
+// Sign in with a password, with the 8 digit QuickLogin code from /ezstats quicklogin, or set a new
+// password ("reset") with the 8 digit code from /ezstats resetpassword.
 let loginMode = "password";
 
 function setLoginMode(mode) {
-  loginMode = mode === "quick" ? "quick" : "password";
+  loginMode = mode === "quick" || mode === "reset" ? mode : "password";
   const quick = loginMode === "quick";
+  const reset = loginMode === "reset";
   for (const button of document.querySelectorAll("#login-mode button")) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === loginMode));
   }
-  $("field-password").hidden = quick;
-  $("field-code").hidden = !quick;
-  $("hint-password").hidden = quick;
+  $("login-title").textContent = reset ? "Reset password" : "Sign in";
+  $("login-mode").hidden = reset;
+  $("field-password").hidden = quick || reset;
+  $("field-code").hidden = !(quick || reset);
+  $("field-new").hidden = !reset;
+  $("code-label").textContent = reset ? "Reset code" : "QuickLogin code";
+  $("hint-password").hidden = loginMode !== "password";
   $("hint-code").hidden = !quick;
-  $("password").required = !quick;
-  $("code").required = quick;
+  $("hint-reset").hidden = !reset;
+  $("password").required = loginMode === "password";
+  $("code").required = quick || reset;
+  $("new-password").required = reset;
+  $("new-password2").required = reset;
+  $("login-submit").textContent = reset ? "Set new password" : "Sign in";
+  $("login-switch").textContent = reset ? "Back to sign in" : "Forgot password?";
   $("login-error").hidden = true;
-  (quick ? $("code") : $("password")).focus();
+  (reset || quick ? $("code") : $("password")).focus();
 }
 for (const button of document.querySelectorAll("#login-mode button")) {
   button.addEventListener("click", () => setLoginMode(button.dataset.mode));
 }
+$("login-switch").addEventListener("click", () => setLoginMode(loginMode === "reset" ? "password" : "reset"));
 // Shown as "1234 5678" while it is typed; only digits are kept.
 $("code").addEventListener("input", (event) => {
   const digits = event.target.value.replace(/\D/g, "").slice(0, 8);
@@ -929,7 +941,15 @@ $("login").addEventListener("submit", async (event) => {
   error.hidden = true;
   submit.disabled = true;
   try {
-    if (loginMode === "quick") {
+    if (loginMode === "reset") {
+      const password = $("new-password").value;
+      if (password !== $("new-password2").value) throw new Error("The two passwords are different.");
+      await post("/api/reset-password", { username: $("username").value.trim(), code: $("code").value, password });
+      $("code").value = "";
+      $("new-password").value = "";
+      $("new-password2").value = "";
+      setLoginMode("password");
+    } else if (loginMode === "quick") {
       await post("/api/quicklogin", { username: $("username").value.trim(), code: $("code").value });
       $("code").value = "";
     } else {
