@@ -178,7 +178,10 @@ function unitTile(d, body) {
     }
     if (d.type === "dehumidifier" && Number.isFinite(d.tank)) body.appendChild(meter("Tank", d.tank, 0.8));
   } else if (d.type === "air_purifier") {
-    if (d.air) body.appendChild(readout("AQI " + d.air.aqi, BAND[d.air.band] || d.air.band));
+    // Always shown: until the purifier has measured the air there is no number, and the card says so.
+    body.appendChild(d.air
+      ? readout("AQI " + d.air.aqi, BAND[d.air.band] || d.air.band)
+      : readout("AQI –", d.powered ? "Not measured yet" : "Switched off"));
     if (Number.isFinite(d.filter)) body.appendChild(meter("Filter", d.filter));
     if (writable) {
       const row = el("div", "profile-row");

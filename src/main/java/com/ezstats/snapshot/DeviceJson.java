@@ -43,7 +43,7 @@ public final class DeviceJson {
         } else if (device instanceof EquipmentView view) {
             equipment(out, api, world, view);
         } else if (device instanceof ClimateUnitView view) {
-            unit(out, view);
+            unit(out, api, world, view);
         } else if (device instanceof VentView view) {
             out.addProperty("kind", "vent");
             out.addProperty("type", view.medium().name().toLowerCase(Locale.ROOT));
@@ -92,7 +92,17 @@ public final class DeviceJson {
         out.addProperty("system", systemName(api, world, view.system()));
     }
 
-    private static void unit(JsonObject out, ClimateUnitView view) {
+    /**
+     * A purifier's view is empty until the purifier has measured, so read the air at its spot instead,
+     * as an air monitor does (and never load a chunk to do it).
+     */
+    private static Optional<AirQuality> airAt(EzvacApi api, World world, Position position) {
+        if (!world.isChunkLoaded(position.x() >> 4, position.z() >> 4)) return Optional.empty();
+        Location location = position.toLocation();
+        return location == null ? Optional.empty() : api.readingAt(location).airQuality();
+    }
+
+    private static void unit(JsonObject out, EzvacApi api, World world, ClimateUnitView view) {
         out.addProperty("kind", "unit");
         out.addProperty("type", view.kind().name().toLowerCase(Locale.ROOT));
         out.addProperty("label", view.label());
@@ -102,7 +112,9 @@ public final class DeviceJson {
         out.addProperty("state", view.state().name().toLowerCase(Locale.ROOT));
         number(out, "tank", view.tank());
         if (view.filter().isPresent()) number(out, "filter", view.filter().getAsDouble());
-        view.airQuality().ifPresent(air -> out.add("air", air(air)));
+        Optional<AirQuality> air = view.airQuality();
+        if (air.isEmpty() && view.kind() == ClimateUnitView.Kind.AIR_PURIFIER) air = airAt(api, world, view.position());
+        air.ifPresent(a -> out.add("air", air(a)));
         view.fanMode().ifPresent(fan -> out.addProperty("fanMode", fan.name().toLowerCase(Locale.ROOT)));
         view.fanSpeed().ifPresent(fan -> out.addProperty("fanSpeed", fan.name().toLowerCase(Locale.ROOT)));
         if (view.insideF().isPresent()) number(out, "insideF", view.insideF().getAsDouble());
