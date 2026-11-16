@@ -16,7 +16,8 @@ switched off, the website is read-only and says why.
 - Paper (or a fork) 1.21.x, Java 21
 - EZvac BETA 1.0 Pilot 3 or newer (API 1.8). EZStats says so and stays off on an older one.
   Controlling devices from the website needs Pilot 7 or newer (API 1.12); on Pilot 3 to 6 the
-  website works but is read-only.
+  website works but is read-only. Pilot 8 or newer (API 1.13) adds how long a thermostat has been in
+  its mode and which devices are running while nobody is near; without it those are simply left out.
 
 ## Install
 
@@ -84,6 +85,18 @@ a marker, and the ticks between them lit in blue (cooling) or orange (heating).
 - **Eco / Normal / Turbo** sets the profile of its system.
 - The range is 60 to 85 degrees F for a room and 75 to 104 for a pool (EZvac keeps the target in
   range). Steps are one degree, or half a degree Celsius, in the server's units.
+- **How long:** under the dial, `Cooling for 12 min · Last heated 14:02 to 14:20` says how long the
+  thermostat has been in its mode and its last finished run. The times are in your browser's time. This
+  needs EZvac BETA 1.0 Pilot 8 or newer.
+
+## Running while nobody is near
+
+Since EZvac BETA 1.0 Pilot 8, a house keeps its temperature while its owner is away: thermostats keep
+calling, heat pumps and furnaces run, fridges stay cold, and humidifiers, dehumidifiers and purifiers keep
+working, even when the chunk isn't loaded. EZvac runs them from what it last saw there, and nothing is
+placed or read in an unloaded chunk. A device in that state shows a **Running while nobody is near**
+chip on its card, and you can watch and control it from the website as before. (Readings of
+thermometers and sensors still need their chunk loaded.)
 
 ## Every device
 

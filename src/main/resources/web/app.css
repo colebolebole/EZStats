@@ -375,6 +375,10 @@ button.small[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
   padding: 0.12rem 0.5rem;
 }
 
+.chip.remote { background: var(--cool-bg); color: var(--cool); }
+.mode-line { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: -0.2rem; }
+.detail .mode-line { font-size: 0.95rem; }
+
 /* Weather from the nearest station */
 .wx {
   display: flex;

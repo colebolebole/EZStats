@@ -165,6 +165,7 @@ Every device has these fields:
 | `nickname` | Optional. The name its owner gave it. |
 | `home` | The id of the home it is in, or `""`. |
 | `weather` | Optional, thermostats only: `{ "station": "<key>", "distance": 98 }`, its nearest weather station and how many blocks away. Absent when no working station is in range. |
+| `loaded` | Optional, thermostats, equipment and units (not vents or instruments), **EZvac BETA 1.0 Pilot 8 or newer**. `true` when the device's chunk is loaded; `false` when it is running unattended: since Pilot 8 EZvac keeps a house running from what it last saw there while nobody is near, and a dashboard can say so. Absent on an older EZvac. |
 
 **`kind: "thermostat"`**, with `type` `room` or `pool`
 
@@ -180,6 +181,8 @@ Every device has these fields:
 | `profile` | `eco`, `normal` or `turbo`. |
 | `blocked` | Its system can't run: no equipment, no vents, or the units are off. |
 | `attention` | What needs a look: `no_units`, `no_vents`, `units_off`, `cant_keep_up`, `undersized`. |
+| `modeSince` | Optional, **Pilot 8 or newer**. When it went into its `mode`, as epoch milliseconds in real time; it counts across restarts. It is a time and not a length so the field doesn't change every second: work the duration out against `state.generatedAt`. Absent when not known. |
+| `lastRun` | Optional, **Pilot 8 or newer**. Its last finished heating or cooling run: `{ "mode": "heating", "startedAt": 1794857423619, "endedAt": 1794859223619 }` (epoch milliseconds). Absent before one has ended. |
 
 **`kind: "equipment"`**, with `type` `heat_pump`, `air_conditioner`, `furnace`, `boiler` or `pool_heat_pump`
 

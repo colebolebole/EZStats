@@ -218,6 +218,8 @@ function thermostatCard(t, homes) {
     row.append(lower, power, raise);
     main.appendChild(row);
   }
+  const since = modeLine(t);
+  if (since) main.appendChild(since);
 
   const stats = el("div", "stats");
   const stat = (name, value) => {
@@ -230,9 +232,11 @@ function thermostatCard(t, homes) {
   if (!writable && t.profile && t.profile !== "normal") stat("Profile", cap(t.profile));
   side.appendChild(stats);
 
-  if (t.attention && t.attention.length) {
+  const remote = remoteChip(t);
+  if ((t.attention && t.attention.length) || remote) {
     const chips = el("div", "chips");
-    for (const item of t.attention) chips.appendChild(el("span", "chip", ATTENTION[item] || item));
+    if (remote) chips.appendChild(remote);
+    for (const item of t.attention || []) chips.appendChild(el("span", "chip", ATTENTION[item] || item));
     side.appendChild(chips);
   }
 

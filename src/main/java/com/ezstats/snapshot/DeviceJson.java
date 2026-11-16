@@ -28,6 +28,23 @@ import java.util.Optional;
 public final class DeviceJson {
     private DeviceJson() {}
 
+    /** Whether the running EZvac has API 1.13 (Pilot 8): set once at start by the plugin. */
+    private static volatile boolean api113;
+
+    public static void setApi113(boolean available) {
+        api113 = available;
+    }
+
+    /** Adds what 1.13 knows, if it is there. Anything that goes wrong turns it off rather than the page. */
+    private static void since113(Runnable add) {
+        if (!api113) return;
+        try {
+            add.run();
+        } catch (LinkageError e) { // a view without the 1.13 methods: an EZvac that says 1.13 but isn't
+            api113 = false;
+        }
+    }
+
     /** The device as JSON. Read on the main thread: it asks EZvac for the system and the spot's reading. */
     public static JsonObject of(EzvacApi api, World world, HvacDevice device) {
         JsonObject out = new JsonObject();
@@ -78,6 +95,7 @@ public final class DeviceJson {
         JsonArray attention = new JsonArray();
         for (ThermostatView.Attention item : view.attention()) attention.add(item.name().toLowerCase(Locale.ROOT));
         out.add("attention", attention);
+        since113(() -> Api113.thermostat(out, view));
     }
 
     private static void equipment(JsonObject out, EzvacApi api, World world, EquipmentView view) {
@@ -90,6 +108,7 @@ public final class DeviceJson {
         number(out, "rpm", view.rpm());
         out.addProperty("tier", view.tier());
         out.addProperty("system", systemName(api, world, view.system()));
+        since113(() -> Api113.equipment(out, view));
     }
 
     /**
@@ -119,6 +138,7 @@ public final class DeviceJson {
         view.fanSpeed().ifPresent(fan -> out.addProperty("fanSpeed", fan.name().toLowerCase(Locale.ROOT)));
         if (view.insideF().isPresent()) number(out, "insideF", view.insideF().getAsDouble());
         view.cold().ifPresent(cold -> out.add("cold", cold(cold)));
+        since113(() -> Api113.unit(out, view));
     }
 
     private static JsonObject cold(ColdStorage cold) {

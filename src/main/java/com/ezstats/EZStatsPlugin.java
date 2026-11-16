@@ -5,6 +5,7 @@ import com.ezstats.account.OwnershipListener;
 import com.ezstats.control.Controls;
 import com.ezstats.control.DeviceControl;
 import com.ezstats.link.LinkManager;
+import com.ezstats.snapshot.DeviceJson;
 import com.ezstats.snapshot.SnapshotService;
 import com.ezstats.web.WebServer;
 import com.github.blade.hvac.api.EzvacApi;
@@ -48,6 +49,8 @@ public final class EZStatsPlugin extends JavaPlugin {
         // Controlling devices needs API 1.12; set once at start, so changing control.enabled needs a restart.
         control = Controls.create(this, api, config.getBoolean("control.enabled", true),
                 apiAtLeast(api.apiVersion(), 1, 12));
+        // API 1.13 (Pilot 8) says whether a device's chunk is loaded and how long a thermostat has been in its mode.
+        DeviceJson.setApi113(apiAtLeast(api.apiVersion(), 1, 13));
         links = new LinkManager(codeTtl(config), config.getLong("session.ttl-hours", 72));
         accounts = new AccountStore(new File(getDataFolder(), "accounts.yml"), getLogger());
         accounts.load();

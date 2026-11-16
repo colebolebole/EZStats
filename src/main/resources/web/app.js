@@ -565,6 +565,66 @@ function showTab(name) {
   else if (data) { lastKey = ""; stamp(data.state); }
 }
 
+// --- how long, and whether it is running unattended (EZvac 1.13) ---------------------------------------
+
+let skewMs = 0; // the server's clock minus this browser's, from the last snapshot
+
+/** "under a minute", "12 min", "2 h 5 min", "1 d 3 h". */
+function spanText(ms) {
+  const minutes = Math.floor(Math.max(0, ms) / 60000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ${minutes % 60} min`;
+  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+}
+
+/** A time of day, with the date when it wasn't today. */
+function clockText(ms) {
+  const when = new Date(ms);
+  return when.toDateString() === new Date().toDateString()
+    ? when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : when.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+const MODE_WORD = { heating: "Heating", cooling: "Cooling", idle: "Idle" };
+
+/** "Heating for 12 min · last cooled 14:02 to 14:20": null when EZvac doesn't say (before Pilot 8). */
+function modeLine(t) {
+  const parts = [];
+  const line = el("div", "mode-line");
+  if (t.enabled && Number.isFinite(t.modeSince)) {
+    const now = el("span", "mode-for");
+    now.dataset.since = String(t.modeSince);
+    now.dataset.word = MODE_WORD[t.mode] || cap(String(t.mode));
+    now.textContent = `${now.dataset.word} for ${spanText(Date.now() + skewMs - t.modeSince)}`;
+    line.appendChild(now);
+  }
+  if (t.lastRun) {
+    const word = t.lastRun.mode === "heating" ? "heated" : "cooled";
+    parts.push(`Last ${word} ${clockText(t.lastRun.startedAt)} to ${clockText(t.lastRun.endedAt)}`);
+  }
+  if (!line.childNodes.length && !parts.length) return null;
+  if (line.childNodes.length && parts.length) line.append(" · ");
+  if (parts.length) line.append(parts.join(" · "));
+  return line;
+}
+
+/** Keeps the "for 12 min" text current between snapshots: the page doesn't redraw for a clock. */
+function tickModeTimes() {
+  for (const node of document.querySelectorAll("[data-since]")) {
+    node.textContent = `${node.dataset.word} for ${spanText(Date.now() + skewMs - Number(node.dataset.since))}`;
+  }
+}
+
+/** A chip for a device whose chunk isn't loaded: EZvac keeps it running from what it last saw there. */
+function remoteChip(d) {
+  if (d.loaded !== false) return null;
+  const chip = el("span", "chip remote", "Running while nobody is near");
+  chip.title = "Its chunk isn't loaded. EZvac keeps it running from what it last saw there.";
+  return chip;
+}
+
 // --- devices: what every card shares ---------------------------------------------------------------
 
 /** What a device is called on the page: its owner's nickname, its own label, or what kind of thing it is. */
@@ -872,6 +932,7 @@ async function refresh() {
     if (editing || changing.size > 0) return; // not while a name is typed or a dial is being turned
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
     const s = d.state;
+    if (Number.isFinite(s.generatedAt)) skewMs = s.generatedAt - Date.now();
     const key = JSON.stringify([s.devices, s.worlds, s.homes, s.stations, d.player]);
     if (key !== lastKey) { lastKey = key; render(d); }
     else stamp(s);
@@ -894,6 +955,7 @@ for (const button of document.querySelectorAll("#wx-status button")) {
   button.addEventListener("click", () => { wxStatus = button.dataset.status; drawWeather(); });
 }
 setInterval(loadWeather, WX_POLL_MS);
+setInterval(tickModeTimes, 20000);
 
 // Sign in with a password, with the 8 digit QuickLogin code from /ezstats quicklogin, or set a new
 // password ("reset") with the 8 digit code from /ezstats resetpassword.

@@ -15,9 +15,9 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <paper.version>1.21.1-R0.1-SNAPSHOT</paper.version>
-        <!-- Built against API 1.12 (EZvac BETA 1.0 Pilot 7), for controlling thermostats. EZStats still runs
+        <!-- Built against API 1.13 (EZvac BETA 1.0 Pilot 8). EZStats still runs
              on EZvac API 1.8 (Pilot 3) and newer: the control code is only loaded where the API has it. -->
-        <ezvac.version>BETA-1.0-P7</ezvac.version>
+        <ezvac.version>BETA-1.0-P8</ezvac.version>
     </properties>
 
     <repositories>

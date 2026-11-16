@@ -138,6 +138,12 @@ function deviceTile(d, homes) {
   }
   node.appendChild(deviceHead(d, pill));
   node.appendChild(body);
+  const remote = remoteChip(d);
+  if (remote) {
+    const chips = el("div", "chips");
+    chips.appendChild(remote);
+    node.appendChild(chips);
+  }
 
   const picker = homePicker(d, homes);
   if (picker) {
