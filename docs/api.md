@@ -182,6 +182,7 @@ Every device has these fields:
 | `blocked` | Its system can't run: no equipment, no vents, or the units are off. |
 | `attention` | What needs a look: `no_units`, `no_vents`, `units_off`, `cant_keep_up`, `undersized`. |
 | `modeSince` | Optional, **Pilot 8 or newer**. When it went into its `mode`, as epoch milliseconds in real time; it counts across restarts. It is a time and not a length so the field doesn't change every second: work the duration out against `state.generatedAt`. Absent when not known. |
+| `runs` | The thermostat's log: its last 5 finished heating and cooling runs, newest first, as `[{ "mode": "heating", "startedAt": 1794857423619, "endedAt": 1794859223619 }, ...]` (epoch milliseconds; `mode` is `heating` or `cooling`). EZStats keeps these itself, from EZvac's mode-change events, in `runs.yml`; on Pilot 8 or newer EZvac's own `lastRun` fills in a run that ended before EZStats was listening. An empty array when none has been seen. |
 | `lastRun` | Optional, **Pilot 8 or newer**. Its last finished heating or cooling run: `{ "mode": "heating", "startedAt": 1794857423619, "endedAt": 1794859223619 }` (epoch milliseconds). Absent before one has ended. |
 
 **`kind: "equipment"`**, with `type` `heat_pump`, `air_conditioner`, `furnace`, `boiler` or `pool_heat_pump`

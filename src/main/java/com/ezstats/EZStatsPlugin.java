@@ -5,6 +5,8 @@ import com.ezstats.account.OwnershipListener;
 import com.ezstats.control.Controls;
 import com.ezstats.control.DeviceControl;
 import com.ezstats.link.LinkManager;
+import com.ezstats.runs.RunListener;
+import com.ezstats.runs.RunLog;
 import com.ezstats.snapshot.DeviceJson;
 import com.ezstats.snapshot.SnapshotService;
 import com.ezstats.web.WebServer;
@@ -22,6 +24,7 @@ public final class EZStatsPlugin extends JavaPlugin {
     private AccountStore accounts;
     private LinkManager links;
     private SnapshotService snapshots;
+    private RunLog runs;
     private WebServer web;
     private String publicUrl;
 
@@ -57,6 +60,14 @@ public final class EZStatsPlugin extends JavaPlugin {
         snapshots = new SnapshotService(this, api, control, accounts::allOwned);
         getServer().getPluginManager().registerEvents(new OwnershipListener(accounts), this);
 
+        // The last few heating and cooling runs of every thermostat, for the log on its card. Saved off the
+        // main thread twice a minute when something changed, and once more when the server stops.
+        runs = new RunLog(new File(getDataFolder(), "runs.yml"), getLogger());
+        runs.load();
+        snapshots.setRunLog(runs);
+        getServer().getPluginManager().registerEvents(new RunListener(runs), this);
+        Bukkit.getScheduler().runTaskTimerAsynchronously(this, runs::saveIfChanged, 600L, 600L);
+
         EZStatsCommand command = new EZStatsCommand(this, api, links, accounts);
         PluginCommand registered = getCommand("ezstats");
         if (registered != null) {
@@ -73,6 +84,7 @@ public final class EZStatsPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         stopWeb();
+        if (runs != null) runs.saveIfChanged();
     }
 
     /** Reads the config again and restarts the website. */

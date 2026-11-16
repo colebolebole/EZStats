@@ -375,6 +375,16 @@ button.small[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
   padding: 0.12rem 0.5rem;
 }
 
+/* The log of a thermostat's last runs */
+.run-log { display: grid; gap: 0.35rem; padding-top: 0.85rem; border-top: 1px solid var(--line); }
+.run-log .kind { margin-top: 0; }
+.run-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.run { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); }
+.run::before { content: ""; flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--idle); }
+.run-heating::before { background: var(--heat); }
+.run-cooling::before { background: var(--cool); }
+.run-empty { color: var(--faint); font-size: 0.85rem; }
+.detail .run-list, .detail .run-empty { font-size: 0.95rem; }
 .chip.remote { background: var(--cool-bg); color: var(--cool); }
 .mode-line { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: -0.2rem; }
 .detail .mode-line { font-size: 0.95rem; }

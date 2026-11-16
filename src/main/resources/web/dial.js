@@ -247,6 +247,9 @@ function thermostatCard(t, homes) {
     side.appendChild(row);
   }
 
+  const log = runLog(t);
+  if (log) side.appendChild(log);
+
   weatherRow(t, side);
 
   const picker = homePicker(t, homes);

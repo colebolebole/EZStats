@@ -579,35 +579,49 @@ function spanText(ms) {
   return `${Math.floor(hours / 24)} d ${hours % 24} h`;
 }
 
-/** A time of day, with the date when it wasn't today. */
+/** "11:44PM", with the date first when it wasn't today ("Nov 15 11:44PM"). */
 function clockText(ms) {
   const when = new Date(ms);
-  return when.toDateString() === new Date().toDateString()
-    ? when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : when.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const hours = when.getHours();
+  const time = `${hours % 12 || 12}:${String(when.getMinutes()).padStart(2, "0")}${hours < 12 ? "AM" : "PM"}`;
+  if (when.toDateString() === new Date().toDateString()) return time;
+  return `${when.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
 const MODE_WORD = { heating: "Heating", cooling: "Cooling", idle: "Idle" };
 
-/** "Heating for 12 min · last cooled 14:02 to 14:20": null when EZvac doesn't say (before Pilot 8). */
+/** "Heating for 12 min", counting up: null when EZvac doesn't say how long (before Pilot 8) or it is off. */
 function modeLine(t) {
-  const parts = [];
+  if (!t.enabled || !Number.isFinite(t.modeSince)) return null;
   const line = el("div", "mode-line");
-  if (t.enabled && Number.isFinite(t.modeSince)) {
-    const now = el("span", "mode-for");
-    now.dataset.since = String(t.modeSince);
-    now.dataset.word = MODE_WORD[t.mode] || cap(String(t.mode));
-    now.textContent = `${now.dataset.word} for ${spanText(Date.now() + skewMs - t.modeSince)}`;
-    line.appendChild(now);
-  }
-  if (t.lastRun) {
-    const word = t.lastRun.mode === "heating" ? "heated" : "cooled";
-    parts.push(`Last ${word} ${clockText(t.lastRun.startedAt)} to ${clockText(t.lastRun.endedAt)}`);
-  }
-  if (!line.childNodes.length && !parts.length) return null;
-  if (line.childNodes.length && parts.length) line.append(" · ");
-  if (parts.length) line.append(parts.join(" · "));
+  const now = el("span", "mode-for");
+  now.dataset.since = String(t.modeSince);
+  now.dataset.word = MODE_WORD[t.mode] || cap(String(t.mode));
+  now.textContent = `${now.dataset.word} for ${spanText(Date.now() + skewMs - t.modeSince)}`;
+  line.appendChild(now);
   return line;
+}
+
+/**
+ * The log of a thermostat's last finished heating and cooling runs, newest first, each as
+ * "heated for 3 min - 11:44PM": how long it ran, and when it stopped. Null when the server sends no log.
+ */
+function runLog(t) {
+  if (!Array.isArray(t.runs)) return null;
+  const box = el("section", "run-log");
+  box.setAttribute("aria-label", "Log of " + deviceName(t));
+  box.appendChild(el("div", "kind", "Log"));
+  if (t.runs.length === 0) {
+    box.appendChild(el("p", "run-empty", "No heating or cooling runs recorded yet."));
+    return box;
+  }
+  const list = el("ul", "run-list");
+  for (const run of t.runs) {
+    const word = run.mode === "heating" ? "heated" : "cooled";
+    list.appendChild(el("li", "run run-" + run.mode, `${word} for ${spanText(run.endedAt - run.startedAt)} - ${clockText(run.endedAt)}`));
+  }
+  box.appendChild(list);
+  return box;
 }
 
 /** Keeps the "for 12 min" text current between snapshots: the page doesn't redraw for a clock. */

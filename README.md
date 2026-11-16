@@ -85,9 +85,15 @@ a marker, and the ticks between them lit in blue (cooling) or orange (heating).
 - **Eco / Normal / Turbo** sets the profile of its system.
 - The range is 60 to 85 degrees F for a room and 75 to 104 for a pool (EZvac keeps the target in
   range). Steps are one degree, or half a degree Celsius, in the server's units.
-- **How long:** under the dial, `Cooling for 12 min · Last heated 14:02 to 14:20` says how long the
-  thermostat has been in its mode and its last finished run. The times are in your browser's time. This
-  needs EZvac BETA 1.0 Pilot 8 or newer.
+- **How long:** under the dial, `Cooling for 12 min` says how long the thermostat has been in its mode,
+  counting up. This needs EZvac BETA 1.0 Pilot 8 or newer.
+- **The log:** below the profile, each thermostat lists its last **5** finished heating and cooling runs,
+  newest first, like `heated for 3 min - 11:44PM`: how long it ran, and when it stopped (with the date
+  when it wasn't today), in your browser's time. EZvac itself only remembers the latest run, so EZStats
+  keeps the rest: it listens for EZvac's mode changes, writes each run down when it ends, and saves them
+  in `plugins/EZStats/runs.yml` so a restart keeps them. A thermostat that is removed loses its log. A
+  run that was already going when EZStats first started is missed unless EZvac (Pilot 8 or newer) can say
+  when it began.
 
 ## Running while nobody is near
 

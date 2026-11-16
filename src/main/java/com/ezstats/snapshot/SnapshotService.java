@@ -2,6 +2,7 @@ package com.ezstats.snapshot;
 
 import com.ezstats.account.AccountStore;
 import com.ezstats.control.DeviceControl;
+import com.ezstats.runs.RunLog;
 import com.github.blade.hvac.api.AirQuality;
 import com.github.blade.hvac.api.EzvacApi;
 import com.github.blade.hvac.api.HvacDevice;
@@ -18,6 +19,7 @@ import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -54,6 +56,7 @@ public final class SnapshotService {
     private final DeviceControl control;
     private final Supplier<Set<String>> ownedKeys;
 
+    private volatile RunLog runLog;
     private volatile Snapshot snapshot;
     private volatile Weather weather = new Weather(Map.of(), Map.of(), NO_WEATHER);
     private BukkitTask task;
@@ -138,6 +141,8 @@ public final class SnapshotService {
                 device.add("weather", link);
                 stationKeys.add(link.get("station").getAsString());
             }
+            JsonArray runs = runsFor(item.key(), device);
+            if (runs != null) device.add("runs", runs);
             devices.add(device);
             worldNames.add(shared.get("world").getAsString());
         }
@@ -155,6 +160,40 @@ public final class SnapshotService {
         root.add("stations", stations);
         root.add("devices", devices);
         return GSON.toJson(root);
+    }
+
+    /** Where the last runs of each thermostat come from. Without one, no thermostat has a log. */
+    public void setRunLog(RunLog log) {
+        this.runLog = log;
+    }
+
+    /**
+     * A thermostat's last runs, newest first, as JSON; null for a device that isn't a thermostat or when there
+     * is no run log. EZvac's own "last run" (API 1.13) is added when the log doesn't have it yet, which covers
+     * what happened before EZStats was listening.
+     */
+    private JsonArray runsFor(String key, JsonObject device) {
+        RunLog log = runLog;
+        if (log == null || !device.has("kind") || !"thermostat".equals(device.get("kind").getAsString())) return null;
+        List<RunLog.Run> runs = new ArrayList<>(log.runs(key));
+        if (device.has("lastRun")) {
+            JsonObject last = device.getAsJsonObject("lastRun");
+            String mode = last.get("mode").getAsString();
+            long ended = last.get("endedAt").getAsLong();
+            boolean known = runs.stream().anyMatch(r -> r.mode().equals(mode) && Math.abs(r.endedAt() - ended) < 2000);
+            if (!known && (runs.isEmpty() || ended > runs.get(0).endedAt())) {
+                runs.add(0, new RunLog.Run(mode, last.get("startedAt").getAsLong(), ended));
+            }
+        }
+        JsonArray array = new JsonArray();
+        for (RunLog.Run run : runs.subList(0, Math.min(runs.size(), RunLog.KEEP))) {
+            JsonObject item = new JsonObject();
+            item.addProperty("mode", run.mode());
+            item.addProperty("startedAt", run.startedAt());
+            item.addProperty("endedAt", run.endedAt());
+            array.add(item);
+        }
+        return array;
     }
 
     private void refresh() {

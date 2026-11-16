@@ -12,8 +12,14 @@ import java.util.Locale;
  * a thermostat has been in its mode. Kept in a class of its own so that {@link DeviceJson} only touches these
  * methods when the running EZvac has them: on an older one they don't exist, and calling them would fail.
  */
-final class Api113 {
+public final class Api113 {
     private Api113() {}
+
+    /** The run the thermostat last finished, as the run log writes it; empty when EZvac has none. */
+    public static java.util.Optional<com.ezstats.runs.RunLog.Run> lastRun(ThermostatView view) {
+        return view.lastRun().map(run -> new com.ezstats.runs.RunLog.Run(run.mode().name().toLowerCase(Locale.ROOT),
+                run.started().toEpochMilli(), run.ended().toEpochMilli()));
+    }
 
     static void thermostat(JsonObject out, ThermostatView view) {
         out.addProperty("loaded", view.loaded());

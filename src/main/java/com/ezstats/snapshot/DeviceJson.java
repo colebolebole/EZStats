@@ -35,6 +35,10 @@ public final class DeviceJson {
         api113 = available;
     }
 
+    public static boolean api113() {
+        return api113;
+    }
+
     /** Adds what 1.13 knows, if it is there. Anything that goes wrong turns it off rather than the page. */
     private static void since113(Runnable add) {
         if (!api113) return;
