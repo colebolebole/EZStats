@@ -54,6 +54,17 @@ a home are shown together: thermostats first as dials, then the other devices as
 Homes are yours alone. Names are up to 32 characters and unique among your homes, and you can have up
 to 20. They are saved in `accounts.yml`, and a device leaves its home when it is released or removed.
 
+**Folding a home away:** click the arrow (or the name) at the left of a home's title to hide its devices
+and click again to show them. Which homes are folded is remembered in your browser, not on the server.
+
+## Full screen
+
+Thermostats, fridges, freezers and mini fridges (and, on the Weather tab, every forecasting weather
+station) have an **open full screen** button next to their name. The view is a bigger version of the
+card: a thermostat has a large dial beside its stats, profile and the whole seven-day forecast, a
+fridge has larger readings, and a station shows its seven days and day-by-day details at once. Everything
+on the card still works there, and it keeps updating. **Back** or **Esc** returns to the page.
+
 ## The thermostat dial
 
 Each thermostat is drawn like a Nest: a ring of ticks with the target on it, the room's temperature as

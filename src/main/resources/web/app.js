@@ -32,6 +32,24 @@ let lastKey = "";
 let data = null;               // what is on the page now
 let editing = false;           // while a name is being typed the page is left alone
 const forecastOpen = new Set(); // keys of the thermostats whose forecast is showing
+let fullscreen = false;        // true only while a card is being built for the full-screen view
+let detail = null;             // the device or station shown full screen: { kind: "device" | "station", key }
+
+// Homes the player folded away. Kept in this browser only: it is a view preference, not account data.
+const COLLAPSED_KEY = "ezstats.collapsedHomes";
+const NO_HOME = "~none";       // the id of the "No home" section
+const collapsedHomes = new Set(loadCollapsed());
+
+function loadCollapsed() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]");
+    return Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : [];
+  } catch (_) { return []; } // storage blocked or damaged: start with every home open
+}
+
+function saveCollapsed() {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedHomes])); } catch (_) { /* not saved */ }
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -69,7 +87,8 @@ async function post(path, body) {
   try { return await response.json(); } catch (_) { return {}; }
 }
 
-function pencilIcon() {
+/** A 20x20 line icon drawn from one SVG path. */
+function iconSvg(d) {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 20 20");
@@ -80,17 +99,21 @@ function pencilIcon() {
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
   const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", "M13.5 3.5l3 3L7 16H4v-3l9.5-9.5z");
+  path.setAttribute("d", d);
   svg.appendChild(path);
   return svg;
 }
 
-function iconButton(label, onClick) {
-  const button = el("button", "edit");
+const PENCIL = "M13.5 3.5l3 3L7 16H4v-3l9.5-9.5z";
+const EXPAND = "M12 3h5v5M8 17H3v-5M17 3l-6 6M3 17l6-6";
+const CHEVRON = "M5 7.5l5 5 5-5";
+
+function iconButton(label, onClick, path, extraClass) {
+  const button = el("button", "edit" + (extraClass ? " " + extraClass : ""));
   button.type = "button";
   button.title = label;
   button.setAttribute("aria-label", label);
-  button.appendChild(pencilIcon());
+  button.appendChild(iconSvg(path || PENCIL));
   button.addEventListener("click", onClick);
   return button;
 }
@@ -230,15 +253,18 @@ function weatherRow(t, node) {
   }
   row.appendChild(now);
 
-  const open = forecastOpen.has(t.key);
-  const toggle = el("button", "link small-link", open ? "Hide forecast" : "Forecast");
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", String(open));
-  toggle.addEventListener("click", () => {
-    if (forecastOpen.has(t.key)) forecastOpen.delete(t.key); else forecastOpen.add(t.key);
-    render(data);
-  });
-  row.appendChild(toggle);
+  // Full screen always shows the forecast, so there is nothing to toggle.
+  const open = fullscreen || forecastOpen.has(t.key);
+  if (!fullscreen) {
+    const toggle = el("button", "link small-link", open ? "Hide forecast" : "Forecast");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.addEventListener("click", () => {
+      if (forecastOpen.has(t.key)) forecastOpen.delete(t.key); else forecastOpen.add(t.key);
+      render(data);
+    });
+    row.appendChild(toggle);
+  }
   node.appendChild(row);
   if (open) node.appendChild(forecastPanel(t, station));
 }
@@ -266,6 +292,7 @@ function forecastPanel(t, station) {
     panel.appendChild(el("div", "fc-now", "This station isn't forecasting right now."));
     return panel;
   }
+  if (fullscreen) panel.appendChild(forecastStrip(station));
   panel.appendChild(forecastList(station));
   return panel;
 }
@@ -354,7 +381,13 @@ function stationCard(station) {
   titles.appendChild(el("h3", "name", station.label));
   titles.appendChild(el("div", "sub", `${station.x}, ${station.y}, ${station.z}`));
   head.appendChild(titles);
-  head.appendChild(el("span", "pill good", "Forecasting"));
+  const status = stationStatus(station);
+  const side = el("div", "head-side");
+  side.appendChild(el("span", "pill" + (station.working ? " good" : ""), status.word));
+  if (!fullscreen) {
+    side.appendChild(iconButton("Open " + station.label + " full screen", () => openDetail("station", station.key), EXPAND, "expand"));
+  }
+  head.appendChild(side);
   node.appendChild(head);
 
   const mine = nearestFor(station.key);
@@ -387,15 +420,17 @@ function stationCard(station) {
 
   node.appendChild(forecastStrip(station));
 
-  const open = wxOpen.has(station.key);
-  const toggle = el("button", "link small-link", open ? "Hide day-by-day" : "Day-by-day details");
-  toggle.type = "button";
-  toggle.setAttribute("aria-expanded", String(open));
-  toggle.addEventListener("click", () => {
-    if (wxOpen.has(station.key)) wxOpen.delete(station.key); else wxOpen.add(station.key);
-    drawWeather();
-  });
-  node.appendChild(toggle);
+  const open = fullscreen || wxOpen.has(station.key);
+  if (!fullscreen) {
+    const toggle = el("button", "link small-link", open ? "Hide day-by-day" : "Day-by-day details");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.addEventListener("click", () => {
+      if (wxOpen.has(station.key)) wxOpen.delete(station.key); else wxOpen.add(station.key);
+      drawWeather();
+    });
+    node.appendChild(toggle);
+  }
   if (open) node.appendChild(forecastList(station));
   return node;
 }
@@ -499,6 +534,7 @@ function drawWeather() {
 function renderWeather(loaded) {
   wx = loaded;
   drawWeather();
+  drawDetail();
 }
 
 async function loadWeather() {
@@ -559,8 +595,62 @@ function deviceHead(d, pill) {
   titles.appendChild(row);
   titles.appendChild(el("div", "sub", deviceWhere(d).join(" · ")));
   head.appendChild(titles);
-  if (pill) head.appendChild(pill);
+  const side = el("div", "head-side");
+  if (pill) side.appendChild(pill);
+  if (!fullscreen && expandable(d)) {
+    side.appendChild(iconButton("Open " + title + " full screen", () => { if (!editing) openDetail("device", d.key); }, EXPAND, "expand"));
+  }
+  if (side.childNodes.length) head.appendChild(side);
   return head;
+}
+
+/** Thermostats, fridges, freezers and mini fridges can be opened full screen. */
+function expandable(d) {
+  return d.kind === "thermostat" || (d.kind === "unit" && FRIDGES.includes(d.type));
+}
+
+// --- the full-screen view of one device or station ------------------------------------------------
+
+/**
+ * Draws the open item, or hides the view when nothing is open (or the item is gone). It is drawn again
+ * whenever the page's data changes, so what it shows stays current.
+ */
+function drawDetail() {
+  let node = null;
+  let title = "";
+  fullscreen = true;
+  try {
+    if (detail && detail.kind === "device" && data) {
+      const d = data.state.devices.find((x) => x.key === detail.key);
+      if (d) { node = deviceCard(d, data.state.homes || []); title = deviceName(d); }
+    } else if (detail && detail.kind === "station" && wx) {
+      const s = wx.stations.find((x) => x.key === detail.key);
+      if (s) { node = stationCard(s); title = s.label; }
+    }
+  } finally {
+    fullscreen = false;
+  }
+  if (!node) detail = null;
+  $("detail").hidden = !node;
+  document.body.classList.toggle("has-detail", !!node);
+  if (!node) { $("detail-body").replaceChildren(); return; }
+  $("detail-title").textContent = title;
+  $("detail").setAttribute("aria-label", title);
+  $("detail-body").replaceChildren(node);
+}
+
+function openDetail(kind, key) {
+  if (editing) return;
+  const wasOpen = detail !== null;
+  detail = { kind, key };
+  drawDetail();
+  if (!wasOpen) { $("detail").scrollTop = 0; $("detail-close").focus(); }
+}
+
+function closeDetail() {
+  if (editing) endEditing();
+  detail = null;
+  drawDetail();
 }
 
 /** The "Home" menu of a card, or null when the player has made no homes. */
@@ -654,25 +744,34 @@ function worldMeta(w) {
   return parts.join(" · ");
 }
 
-function worldMeta(w) {
-  const parts = [];
-  if (w.season) {
-    parts.push(`${cap(w.season.name)}, day ${w.season.day} of ${w.season.days}${w.season.paused ? " (paused)" : ""}`);
-  }
-  if (w.outdoor) {
-    let outside = `${fmt(w.outdoor.airF)}°${units} outside`;
-    if (w.outdoor.weather) outside += `, ${w.outdoor.weather.toLowerCase()}`;
-    parts.push(outside);
-  }
-  return parts.join(" · ");
-}
-
 /** A home with the devices in it; `home` is null for the devices that are in no home. */
 function homeSection(home, list, homes) {
+  const id = home ? home.id : NO_HOME;
+  const name = home ? home.name : "No home";
   const group = el("section", "group");
   const head = el("div", "group-head");
   const titles = el("div", "group-title");
-  titles.appendChild(el("h2", "", home ? home.name : "No home"));
+  const content = el("div", "group-body");
+
+  // The chevron folds the home's devices away; the choice is remembered in this browser.
+  const toggle = iconButton("", () => flip(), CHEVRON, "collapse");
+  function sync() {
+    const folded = collapsedHomes.has(id);
+    group.classList.toggle("collapsed", folded);
+    content.hidden = folded;
+    toggle.setAttribute("aria-expanded", String(!folded));
+    const label = (folded ? "Expand " : "Collapse ") + name;
+    toggle.title = label;
+    toggle.setAttribute("aria-label", label);
+  }
+  function flip() {
+    if (collapsedHomes.has(id)) collapsedHomes.delete(id); else collapsedHomes.add(id);
+    saveCollapsed();
+    sync();
+  }
+  const heading = el("h2", "", name);
+  heading.addEventListener("click", flip);
+  titles.append(toggle, heading);
   titles.appendChild(el("span", "group-meta", `${list.length} device${list.length === 1 ? "" : "s"}`));
   head.appendChild(titles);
   if (home) {
@@ -684,13 +783,13 @@ function homeSection(home, list, homes) {
     actions.appendChild(del);
     head.appendChild(actions);
   }
-  group.appendChild(head);
-
   if (list.length === 0) {
-    group.appendChild(el("p", "home-empty", "Nothing here yet. Use the Home menu on a device to move it in."));
+    content.appendChild(el("p", "home-empty", "Nothing here yet. Use the Home menu on a device to move it in."));
   } else {
-    group.appendChild(deviceGrids(list, homes));
+    content.appendChild(deviceGrids(list, homes));
   }
+  group.append(head, content);
+  sync();
   return group;
 }
 
@@ -730,6 +829,10 @@ function render(d) {
   }
 
   const homes = state.homes || [];
+  // Forget folded homes that no longer exist.
+  const before = collapsedHomes.size;
+  for (const id of [...collapsedHomes]) if (id !== NO_HOME && !homes.some((h) => h.id === id)) collapsedHomes.delete(id);
+  if (collapsedHomes.size !== before) saveCollapsed();
   const groups = $("groups");
   groups.replaceChildren();
   if (homes.length === 0) {
@@ -742,6 +845,7 @@ function render(d) {
     if (loose.length) groups.appendChild(homeSection(null, loose, homes));
   }
   $("empty").hidden = state.devices.length > 0;
+  drawDetail();
   stamp(state);
 }
 
@@ -755,6 +859,8 @@ function renderUnlinked() {
   $("linked").hidden = true;
   $("who").hidden = true;
   lastKey = "";
+  detail = null;
+  drawDetail();
 }
 
 async function refresh() {
@@ -774,6 +880,11 @@ async function refresh() {
   }
 }
 
+$("detail-close").addEventListener("click", closeDetail);
+document.addEventListener("keydown", (event) => {
+  // Escape inside a rename form cancels the rename, not the full-screen view behind it.
+  if (event.key === "Escape" && detail && !editing && !(event.target.closest && event.target.closest("form.rename"))) closeDetail();
+});
 $("new-home").addEventListener("click", startNewHome);
 $("tab-devices").addEventListener("click", () => showTab("devices"));
 $("tab-weather").addEventListener("click", () => showTab("weather"));

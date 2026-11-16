@@ -194,12 +194,16 @@ function roundButton(label, onClick, content) {
 // --- the thermostat card --------------------------------------------------------------------------
 
 function thermostatCard(t, homes) {
-  const node = el("article", "card thermo " + (t.enabled ? t.mode : "off"));
+  const root = el("article", "card thermo " + (t.enabled ? t.mode : "off"));
+  // Full screen puts the dial on the left and everything else beside it.
+  const main = fullscreen ? el("div", "fs-main") : root;
+  const side = fullscreen ? el("div", "fs-side") : root;
+  if (fullscreen) root.append(main, side);
   const title = deviceName(t);
-  node.appendChild(deviceHead(t, el("span", "pill " + (t.enabled ? t.mode : ""), t.enabled ? (MODES[t.mode] || t.mode) : "Off")));
+  main.appendChild(deviceHead(t, el("span", "pill " + (t.enabled ? t.mode : ""), t.enabled ? (MODES[t.mode] || t.mode) : "Off")));
 
   const dial = makeDial(t, writable && t.enabled, (f) => act(t.key, "target", f));
-  node.appendChild(dial.el);
+  main.appendChild(dial.el);
 
   if (writable) {
     const row = el("div", "dial-actions");
@@ -212,7 +216,7 @@ function thermostatCard(t, homes) {
     const raise = roundButton("Raise the target of " + title, () => dial.nudge(1), "+");
     lower.disabled = raise.disabled = !t.enabled;
     row.append(lower, power, raise);
-    node.appendChild(row);
+    main.appendChild(row);
   }
 
   const stats = el("div", "stats");
@@ -224,28 +228,28 @@ function thermostatCard(t, homes) {
   if (Number.isFinite(t.humidity)) stat("Humidity", Math.round(t.humidity) + "%");
   stat("Equipment", `${t.runningUnits}/${t.totalUnits} running`);
   if (!writable && t.profile && t.profile !== "normal") stat("Profile", cap(t.profile));
-  node.appendChild(stats);
+  side.appendChild(stats);
 
   if (t.attention && t.attention.length) {
     const chips = el("div", "chips");
     for (const item of t.attention) chips.appendChild(el("span", "chip", ATTENTION[item] || item));
-    node.appendChild(chips);
+    side.appendChild(chips);
   }
 
   if (writable) {
     const row = el("div", "profile-row");
     row.appendChild(el("span", "profile-label", "Profile"));
     row.appendChild(segmented("Profile of " + title, ["eco", "normal", "turbo"], t.profile, (name) => act(t.key, "profile", name)));
-    node.appendChild(row);
+    side.appendChild(row);
   }
 
-  weatherRow(t, node);
+  weatherRow(t, side);
 
   const picker = homePicker(t, homes);
   if (picker) {
     const foot = el("div", "card-foot");
     foot.appendChild(picker);
-    node.appendChild(foot);
+    side.appendChild(foot);
   }
-  return node;
+  return root;
 }
