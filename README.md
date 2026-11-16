@@ -20,7 +20,7 @@ switched off, the website is read-only and says why.
 
 ## Install
 
-1. Put `EZStats-0.6.2.jar` in `plugins/` next to EZvac.
+1. Put `EZStats-0.6.3.jar` in `plugins/` next to EZvac.
 2. Start the server once, then edit `plugins/EZStats/config.yml`: set `web.public-url` to the
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
@@ -202,7 +202,7 @@ checks ownership before it calls either.
 mvn package
 ```
 
-The jar is `target/EZStats-0.6.2.jar`. EZvac's API comes from JitPack and is `provided`: never
+The jar is `target/EZStats-0.6.3.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.
 
 ## License
