@@ -48,7 +48,7 @@ public final class EZStatsPlugin extends JavaPlugin {
         // Controlling devices needs API 1.12; set once at start, so changing control.enabled needs a restart.
         control = Controls.create(this, api, config.getBoolean("control.enabled", true),
                 apiAtLeast(api.apiVersion(), 1, 12));
-        links = new LinkManager(config.getLong("link.token-ttl-seconds", 300), config.getLong("session.ttl-hours", 72));
+        links = new LinkManager(codeTtl(config), config.getLong("session.ttl-hours", 72));
         accounts = new AccountStore(new File(getDataFolder(), "accounts.yml"), getLogger());
         accounts.load();
         snapshots = new SnapshotService(this, api, control, accounts::allOwned);
@@ -75,9 +75,14 @@ public final class EZStatsPlugin extends JavaPlugin {
     /** Reads the config again and restarts the website. */
     public void reload() {
         reloadConfig();
-        links.configure(getConfig().getLong("link.token-ttl-seconds", 300), getConfig().getLong("session.ttl-hours", 72));
+        links.configure(codeTtl(getConfig()), getConfig().getLong("session.ttl-hours", 72));
         stopWeb();
         startWeb();
+    }
+
+    /** How long a QuickLogin code works, in seconds. A config from before QuickLogin still has the old link key. */
+    private static long codeTtl(FileConfiguration config) {
+        return config.getLong("quicklogin.ttl-seconds", config.getLong("link.token-ttl-seconds", 300));
     }
 
     /** Whether an API version such as "1.11" is at least major.minor. */
@@ -103,7 +108,7 @@ public final class EZStatsPlugin extends JavaPlugin {
                 config.getBoolean("web.trust-forwarded-for", false), config.getBoolean("weather-tab.enabled", true));
         try {
             web.start(bind, port);
-            getLogger().info("Website listening on " + bind + ":" + port + "; links point at " + publicUrl);
+            getLogger().info("Website listening on " + bind + ":" + port + "; players are told " + publicUrl);
         } catch (IOException | RuntimeException e) {
             getLogger().severe("Could not start the website on " + bind + ":" + port + ": " + e.getMessage()
                     + ". Change web.port in config.yml, then run /ezstats reload.");
@@ -123,7 +128,7 @@ public final class EZStatsPlugin extends JavaPlugin {
         String ip = Bukkit.getIp();
         if (ip == null || ip.isBlank()) {
             ip = "localhost";
-            getLogger().warning("web.public-url is empty and server-ip is not set, so /ezstats link will give "
+            getLogger().warning("web.public-url is empty and server-ip is not set, so /ezstats quicklogin will tell players "
                     + "http://localhost:" + port + ", which only works on this machine. Set web.public-url.");
         }
         return "http://" + ip + ":" + port;

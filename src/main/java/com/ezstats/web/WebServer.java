@@ -30,8 +30,8 @@ import java.util.logging.Logger;
  * request and response, in {@code docs/api.md}.
  *
  * <ul>
- *   <li>{@code GET /link?token=} spends a link token, sets the session cookie and goes to {@code /}</li>
  *   <li>{@code POST /api/login} a Minecraft name and the password from {@code /ezstats register}</li>
+ *   <li>{@code POST /api/quicklogin} a Minecraft name and the eight digit code from {@code /ezstats quicklogin}</li>
  *   <li>{@code POST /api/logout}</li>
  *   <li>{@code GET /api/state} the devices, homes and nearest weather stations of the signed-in player</li>
  *   <li>{@code GET /api/weather} every weather station and its forecast</li>
@@ -58,6 +58,7 @@ public final class WebServer {
 
     private static final int MAX_USERNAME = 32;
     private static final int MAX_PASSWORD = 128;
+    private static final int MAX_CODE_INPUT = 32; // room for spaces and dashes around eight digits
     private static final int MAX_FAILS_PER_USER = 5;
     private static final int MAX_FAILS_PER_ADDRESS = 20;
 
@@ -122,8 +123,6 @@ public final class WebServer {
             if (method.equals("GET") && STATIC.containsKey(path)) {
                 String[] entry = STATIC.get(path);
                 send(exchange, 200, entry[1], files.get(entry[0]));
-            } else if (method.equals("GET") && path.equals("/link")) {
-                link(exchange);
             } else if (method.equals("GET") && path.equals("/api/state")) {
                 state(exchange);
             } else if (method.equals("GET") && path.equals("/api/weather")) {
@@ -142,6 +141,8 @@ public final class WebServer {
                 homeDelete(exchange);
             } else if (method.equals("POST") && path.equals("/api/login")) {
                 login(exchange);
+            } else if (method.equals("POST") && path.equals("/api/quicklogin")) {
+                quickLogin(exchange);
             } else if (method.equals("POST") && path.equals("/api/logout")) {
                 logout(exchange);
             } else {
@@ -155,20 +156,56 @@ public final class WebServer {
         }
     }
 
-    private void link(HttpExchange exchange) throws IOException {
-        String token = query(exchange, "token");
-        Optional<String> session = links.redeem(token);
-        if (session.isEmpty()) {
-            send(exchange, 410, "text/html; charset=utf-8", ("<!doctype html><meta charset=utf-8>"
-                    + "<meta name=viewport content='width=device-width,initial-scale=1'><title>EZStats</title>"
-                    + "<body style='font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem'>"
-                    + "<h1>This link has expired</h1><p>Links work once, for a few minutes. "
-                    + "Run <code>/ezstats link</code> in game for a new one.</p>").getBytes(StandardCharsets.UTF_8));
+    /**
+     * Signs in with a Minecraft name and the eight digit QuickLogin code {@code /ezstats quicklogin} gave in chat.
+     * Wrong tries share the limiter of password sign-in, and each also counts against the code itself,
+     * which is destroyed after a few: see {@link LinkManager}. Every failure answers the same.
+     */
+    private void quickLogin(HttpExchange exchange) throws IOException {
+        if (exchange.getRequestHeaders().getFirst("X-EZStats") == null) {
+            json(exchange, 403, error("Missing X-EZStats header"));
             return;
         }
+        JsonObject body = readBody(exchange);
+        if (body == null) return;
+        String username;
+        String code;
+        try {
+            username = body.get("username").getAsString().trim();
+            code = body.get("code").getAsString();
+        } catch (RuntimeException e) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        if (username.isEmpty() || username.length() > MAX_USERNAME || code.length() > MAX_CODE_INPUT) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        // Spaces and dashes are for reading ("1234 5678"); what's left must be exactly eight digits.
+        code = code.replaceAll("[\\s-]", "");
+        if (!code.matches("[0-9]{" + LinkManager.CODE_DIGITS + "}")) {
+            json(exchange, 400, error("The code is " + LinkManager.CODE_DIGITS + " digits."));
+            return;
+        }
+
+        String ip = clientIp(exchange);
+        String ipKey = "ip:" + ip;
+        String userKey = "user:" + ip + "|" + username.toLowerCase(java.util.Locale.ROOT);
+        if (limiter.locked(ipKey) || limiter.locked(userKey)) {
+            json(exchange, 429, error("Too many tries. Wait a few minutes and try again."));
+            return;
+        }
+
+        Optional<String> session = links.redeem(username, code);
+        if (session.isEmpty()) {
+            limiter.failure(ipKey, MAX_FAILS_PER_ADDRESS);
+            limiter.failure(userKey, MAX_FAILS_PER_USER);
+            json(exchange, 401, error("That code didn't work. Run /ezstats quicklogin in game for a new one."));
+            return;
+        }
+        limiter.success(userKey);
         setSessionCookie(exchange, session.get());
-        exchange.getResponseHeaders().add("Location", "/");
-        send(exchange, 302, "text/plain", new byte[0]);
+        json(exchange, 200, "{\"ok\":true}");
     }
 
     private void setSessionCookie(HttpExchange exchange, String sessionId) {
@@ -555,18 +592,6 @@ public final class WebServer {
             for (String part : header.split(";")) {
                 String trimmed = part.trim();
                 if (trimmed.startsWith(COOKIE + "=")) return trimmed.substring(COOKIE.length() + 1);
-            }
-        }
-        return null;
-    }
-
-    private static String query(HttpExchange exchange, String name) {
-        String query = exchange.getRequestURI().getRawQuery();
-        if (query == null) return null;
-        for (String pair : query.split("&")) {
-            int eq = pair.indexOf('=');
-            if (eq > 0 && pair.substring(0, eq).equals(name)) {
-                return java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
             }
         }
         return null;

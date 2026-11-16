@@ -136,6 +136,9 @@ input {
 .form { width: 100%; max-width: 22rem; padding: 1.6rem; display: grid; gap: 0.3rem; }
 .form h1 { font-size: 1.3rem; margin-bottom: 0.6rem; }
 .form label { font-size: 0.82rem; color: var(--muted); margin-top: 0.5rem; }
+.form .seg { justify-self: start; margin-bottom: 0.4rem; }
+.field { display: grid; gap: 0.3rem; }
+.code-input { font-size: 1.4rem; letter-spacing: 0.2em; font-variant-numeric: tabular-nums; text-align: center; }
 .error { color: var(--danger); font-size: 0.88rem; margin-top: 0.4rem; }
 .hint { color: var(--muted); font-size: 0.84rem; margin-top: 1rem; }
 

@@ -6,7 +6,7 @@ web:
   bind: 0.0.0.0
   port: 8765
   # The address players open, as they reach it from outside: it is what
-  # /ezstats link puts in the link, with no trailing slash. For example
+  # /ezstats quicklogin tells players to open, with no trailing slash. For example
   # https://stats.example.com (behind a proxy) or http://play.example.com:8765.
   # Left empty, EZStats guesses http://<server-ip>:<port>, which only works if
   # server.properties has your server's address in server-ip.
@@ -16,13 +16,15 @@ web:
   # proxy's; with no proxy, a visitor could fake it to dodge the limiter.
   trust-forwarded-for: false
 
-link:
-  # How long a /ezstats link link works, and it works once.
-  token-ttl-seconds: 300
+quicklogin:
+  # How long the eight digit QuickLogin code from /ezstats quicklogin works. It works once, and is destroyed after
+  # five wrong guesses. At least 30. (Older versions called this link.token-ttl-seconds; that is
+  # still read when quicklogin.ttl-seconds is missing.)
+  ttl-seconds: 300
 
 session:
-  # How long a linked browser stays signed in. Sessions are kept in memory:
-  # a server restart signs everyone out, and /ezstats link signs them back in.
+  # How long a signed-in browser stays signed in. Sessions are kept in memory:
+  # a server restart signs everyone out, and /ezstats quicklogin signs them back in.
   ttl-hours: 72
 
 # How often the dashboard's numbers are read from EZvac, in ticks (20 = every second).

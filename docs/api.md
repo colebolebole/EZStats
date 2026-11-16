@@ -13,7 +13,7 @@ is built in [`SnapshotService.java`](../src/main/java/com/ezstats/snapshot/Snaps
 [`DeviceJson.java`](../src/main/java/com/ezstats/snapshot/DeviceJson.java).
 
 - [Conventions](#conventions)
-- [Signing in](#signing-in): [`GET /link`](#get-link), [`POST /api/login`](#post-apilogin), [`POST /api/logout`](#post-apilogout)
+- [Signing in](#signing-in): [`POST /api/quicklogin`](#post-apiquicklogin), [`POST /api/login`](#post-apilogin), [`POST /api/logout`](#post-apilogout)
 - [Reading](#reading): [`GET /api/state`](#get-apistate), [`GET /api/weather`](#get-apiweather)
 - [Changing devices](#changing-devices): [`POST /api/device/control`](#post-apidevicecontrol)
 - [Your own data](#your-own-data): [nicknames](#post-apidevicenickname), [homes](#homes)
@@ -50,16 +50,25 @@ is built in [`SnapshotService.java`](../src/main/java/com/ezstats/snapshot/Snaps
 
 A player gets in one of two ways, and both end with the same session cookie.
 
-### `GET /link`
+### `POST /api/quicklogin`
 
-Spends a one-time link made by `/ezstats link` in game.
+**QuickLogin:** signs in with a Minecraft name and the eight digit one-time code that `/ezstats quicklogin`
+sent the player in chat. No password needed.
 
-| Query | |
-| --- | --- |
-| `token` | The token from the link: 256 random bits, valid once, for `link.token-ttl-seconds` (5 minutes by default). |
+```json
+{ "username": "Steve", "code": "1234 5678" }
+```
 
-- **`302`** to `/` with `Set-Cookie: ezstats_session=...` when the token is good.
-- **`410`** with a small HTML page when it is unknown, used or expired.
+- `username` is the Minecraft name, any case, at most 32 characters. `code` is eight digits; spaces and
+  dashes are ignored (`"1234 5678"`, `"1234-5678"` and `"12345678"` are the same).
+- **`200`** `{"ok":true}` with `Set-Cookie: ezstats_session=...`.
+- **`401`** `{"error":"That code didn't work. Run /ezstats quicklogin in game for a new one."}`. The same
+  answer whether the name has no code, the code is wrong, used or expired.
+- **`429`** after too many wrong tries; see [Limits and security](#limits-and-security).
+- **`400`** for a missing field, or a code that isn't eight digits.
+
+A code works once, for `quicklogin.ttl-seconds` (5 minutes by default), and is destroyed after five wrong
+guesses. The old `GET /link` route, which spent a link in a URL, is gone.
 
 ### `POST /api/login`
 
@@ -327,15 +336,13 @@ Anything else that isn't an API path is `404`.
 | Status | Meaning here |
 | --- | --- |
 | `200` | Done. |
-| `302` | `GET /link` worked: the cookie is set, go to `/`. |
 | `400` | Bad request: a missing, mistyped or unacceptable field. |
 | `401` | Not signed in (no cookie, or the session expired or was ended). |
 | `403` | A `POST` without `X-EZStats`, a device that isn't yours, or EZvac or a plugin refused. |
 | `404` | Unknown path, a home or device that doesn't exist, or the Weather tab switched off. |
 | `409` | A home name already used, or the 20-home limit. |
-| `410` | `GET /link` with a token that is unknown, used or expired. |
 | `413` | A body over 4096 bytes. |
-| `429` | Too many wrong passwords. |
+| `429` | Too many wrong passwords or QuickLogin codes. |
 | `500` | Something went wrong on the server; it is logged in the console. |
 | `501` | The website can't change devices on this server. |
 | `503`, `504` | EZvac was interrupted or didn't answer in time. |
@@ -343,13 +350,19 @@ Anything else that isn't an API path is `404`.
 ## Limits and security
 
 - **Passwords** are stored as salted PBKDF2-HMAC-SHA256 hashes in `accounts.yml`.
-- **Wrong passwords are limited.** Five wrong tries for the same address and username, or twenty from one
-  address, lock that key for five minutes (tries are counted over ten minutes). While locked, even the
-  right password gets `429`. Behind a reverse proxy, set `web.trust-forwarded-for: true` so addresses are
+- **QuickLogin codes** are eight random digits from a `SecureRandom`, held in memory as a keyed hash
+  (HMAC-SHA-256, compared in constant time), never the digits. A player has one at a time (asking again
+  cancels the first, and no more than once in 10 seconds), it works once, expires, and is **destroyed after
+  five wrong guesses from anyone, anywhere**, so a code can be guessed with a chance of at most 5 in 100
+  million. Every failure answers the same, so a visitor can't tell which names have a code. The code goes
+  only to the player's own chat, never the console, and never into a URL.
+- **Wrong passwords and codes are limited.** Five wrong tries for the same address and username, or twenty
+  from one address (passwords and codes count together), lock that key for five minutes (tries are counted
+  over ten minutes). While locked, even the right password or code gets `429`. Behind a reverse proxy, set `web.trust-forwarded-for: true` so addresses are
   the client's, from `X-Forwarded-For`; otherwise every visitor shares the proxy's address.
 - **Sessions** are random 256-bit values kept in memory and last `session.ttl-hours` (72 by default). A
   server restart ends them all; `/ezstats unlink` or `/ezstats password` ends a player's.
-- **Plain HTTP sends the password and cookie in the clear.** Put the site behind a TLS reverse proxy for
+- **Plain HTTP sends the password, the QuickLogin code and the cookie in the clear.** Put the site behind a TLS reverse proxy for
   anything public, and set `web.public-url` to the `https://` address so the cookie is `Secure`.
 - **Owner only.** A device's owner is the first player to claim it. The server checks it on every change
   and every edit, before EZvac is asked.

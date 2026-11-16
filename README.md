@@ -25,6 +25,10 @@ switched off, the website is read-only and says why.
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
 
+**QuickLogin replaces the sign-in link.** `/ezstats link` no longer makes a link: it (like `/ezstats
+quicklogin`) sends an 8 digit code. The `link.token-ttl-seconds` setting is now `quicklogin.ttl-seconds`;
+the old name is still read if the new one is missing.
+
 **Updating from 0.6.0 or earlier:** nothing to do. Your `accounts.yml` is updated on first start: folders
 become homes, and what you owned stays yours.
 
@@ -35,7 +39,9 @@ become homes, and what you owned stays yours.
 2. Look at a device (a thermostat's sign, a humidifier's sign, a heat pump's dispenser, a sensor's
    button, a vent...) within 6 blocks and run **`/ezstats own`**. It's now on your account.
    **`/ezstats own system`** claims a thermostat, its equipment, vents, panels and monitors in one go.
-3. Open the website, sign in with your Minecraft name and password, and your devices are there.
+3. Open the website, sign in with your Minecraft name and password, and your devices are there. No
+   password handy? Run **`/ezstats quicklogin`**, then type the 8 digit code it sends you on the
+   website's **QuickLogin** tab.
 4. Give a device a nickname: look at it and run **`/ezstats nick Living Room`**, or click the pencil
    next to its name on the website. Nicknames are saved with your account.
 5. Group devices into homes on the website: click **New home**, then use the **Home** menu on each device.
@@ -158,7 +164,7 @@ off, set `weather-tab.enabled: false` in `config.yml`.
 | `/ezstats own system` | `ezstats.use` | Claims the device you're looking at and every device of its system: the thermostat, its equipment, vents, panels and monitors |
 | `/ezstats nick [nickname]` (or `rename`) | `ezstats.use` | Names the device you're looking at, up to 32 characters, on your EZStats page. With no nickname it goes back to its own name. The sign itself is unchanged: EZvac's API can't rename, and `/hvac rename` does that |
 | `/ezstats disown` | `ezstats.use` | Lets go of the device you're looking at. Admins can free anyone's |
-| `/ezstats link` | `ezstats.use` | A one-time link that signs your browser in, no password |
+| `/ezstats quicklogin` (or `ql`) | `ezstats.use` | **QuickLogin:** sends you an 8 digit one-time code in chat that signs your browser in, no password. `otp`, `code` and the old `link` still work |
 | `/ezstats unlink` | `ezstats.use` | Signs every browser of yours out |
 | `/ezstats status` | `ezstats.use` | The website's address, your password and devices, who is signed in (admins) |
 | `/ezstats reload` | `ezstats.admin` (ops) | Reads `config.yml` again and restarts the website |
@@ -178,8 +184,19 @@ starts unowned, and the nickname and home go with it. A nickname belongs to the 
 - **Password:** passwords are stored as salted PBKDF2-HMAC-SHA256 hashes in
   `plugins/EZStats/accounts.yml`, along with who owns what. Wrong guesses are limited: 5 per
   address and username, 20 per address, then a 5-minute wait.
-- **Link:** `/ezstats link` makes a random 256-bit token that opens once and expires (5 minutes by
-  default).
+- **QuickLogin:** `/ezstats quicklogin` sends *you* (in chat, nobody else) an 8 digit code. Type it on
+  the website with your Minecraft name and you are signed in, no password. Eight digits are few, so
+  it is protected by more than its length:
+  - it is random, works **once**, and expires (5 minutes by default, `quicklogin.ttl-seconds`);
+  - you have one code at a time: a new one cancels the old, and you can ask once every 10 seconds;
+  - after **5 wrong guesses** (from anyone, anywhere) the code is destroyed, so a guess succeeds with a
+    chance of at most 5 in 100 million;
+  - wrong tries also count against the per-address limit above, and every failure gives the same answer,
+    so nobody can tell which players have a code;
+  - the code is kept only as a keyed hash in memory, compared in constant time, and is never in the
+    console, a log or a URL. The cost to you: the code is shown in your own chat, so don't screenshare it.
+  Someone who knows your name could use up your 5 guesses and make you ask for a new code: annoying, not
+  a way in.
 - Either way the browser gets a `HttpOnly`, `SameSite=Strict` cookie and stays signed in for
   `session.ttl-hours`. Sessions live in memory, so a restart signs everyone out.
 

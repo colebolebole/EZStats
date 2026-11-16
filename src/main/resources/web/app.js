@@ -895,6 +895,33 @@ for (const button of document.querySelectorAll("#wx-status button")) {
 }
 setInterval(loadWeather, WX_POLL_MS);
 
+// Sign in with a password, or with the 8 digit QuickLogin code from /ezstats quicklogin.
+let loginMode = "password";
+
+function setLoginMode(mode) {
+  loginMode = mode === "quick" ? "quick" : "password";
+  const quick = loginMode === "quick";
+  for (const button of document.querySelectorAll("#login-mode button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === loginMode));
+  }
+  $("field-password").hidden = quick;
+  $("field-code").hidden = !quick;
+  $("hint-password").hidden = quick;
+  $("hint-code").hidden = !quick;
+  $("password").required = !quick;
+  $("code").required = quick;
+  $("login-error").hidden = true;
+  (quick ? $("code") : $("password")).focus();
+}
+for (const button of document.querySelectorAll("#login-mode button")) {
+  button.addEventListener("click", () => setLoginMode(button.dataset.mode));
+}
+// Shown as "1234 5678" while it is typed; only digits are kept.
+$("code").addEventListener("input", (event) => {
+  const digits = event.target.value.replace(/\D/g, "").slice(0, 8);
+  event.target.value = digits.length > 4 ? digits.slice(0, 4) + " " + digits.slice(4) : digits;
+});
+
 $("login").addEventListener("submit", async (event) => {
   event.preventDefault();
   const error = $("login-error");
@@ -902,8 +929,13 @@ $("login").addEventListener("submit", async (event) => {
   error.hidden = true;
   submit.disabled = true;
   try {
-    await post("/api/login", { username: $("username").value.trim(), password: $("password").value });
-    $("password").value = "";
+    if (loginMode === "quick") {
+      await post("/api/quicklogin", { username: $("username").value.trim(), code: $("code").value });
+      $("code").value = "";
+    } else {
+      await post("/api/login", { username: $("username").value.trim(), password: $("password").value });
+      $("password").value = "";
+    }
     await refresh();
   } catch (e) {
     error.textContent = e.message;
