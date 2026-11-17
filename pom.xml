@@ -6,7 +6,7 @@
 
     <groupId>com.ezstats</groupId>
     <artifactId>ezstats</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.4</version>
     <packaging>jar</packaging>
     <name>EZStats</name>
     <description>A web dashboard for EZvac thermostats, linked from in game with /ezstats link.</description>

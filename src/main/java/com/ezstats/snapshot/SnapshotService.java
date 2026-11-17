@@ -297,7 +297,10 @@ public final class SnapshotService {
         out.addProperty("key", key);
         out.addProperty("label", station.label());
         World world = Bukkit.getWorld(position.world());
-        if (world != null) out.addProperty("world", world.getName());
+        if (world != null) {
+            out.addProperty("world", world.getName());
+            out.addProperty("worldTime", timeOfDay(world));
+        }
         out.addProperty("x", position.x());
         out.addProperty("y", position.y());
         out.addProperty("z", position.z());
@@ -349,6 +352,7 @@ public final class SnapshotService {
     private JsonObject worldJson(World world) {
         JsonObject out = new JsonObject();
         out.addProperty("name", world.getName());
+        out.addProperty("time", timeOfDay(world));
         api.season(world).ifPresent(season -> {
             JsonObject s = new JsonObject();
             s.addProperty("name", season.season().name().toLowerCase(Locale.ROOT));
@@ -369,6 +373,15 @@ public final class SnapshotService {
             // A world without outdoors (some custom dimensions): leave it out.
         }
         return out;
+    }
+
+    /**
+     * The in-game time of day in ticks, 0 to 23999: 0 is sunrise (6:00), 6000 noon, 12000 sunset
+     * (18:00), 18000 midnight. {@code World.getTime()} is already the time of day, not the age of
+     * the world; the modulo only guards the range. Read on the main thread, like the rest.
+     */
+    static int timeOfDay(World world) {
+        return (int) Math.floorMod(world.getTime(), 24000L);
     }
 
     /** A device's key: its world and block. Labels can repeat, so they can't be keys. */

@@ -224,11 +224,15 @@ only while its chunk is loaded. A `reading` holds some of `tempF`, `humidity`, `
 
 ```json
 { "name": "world",
+  "time": 6000,
   "season":  { "name": "summer", "day": 3, "days": 15, "paused": false },
   "outdoor": { "airF": 88.2, "feelsLikeF": 93.0, "humidity": 40.0, "weather": "Clear" } }
 ```
 
-`season` is absent in a world without seasons. `outdoor` is the climate at the world's spawn.
+`time` is the in-game time of day in the world, in ticks, 0 to 23999 (**new in 0.7.4**): `0` is sunrise (6:00),
+`6000` noon, `12000` sunset (18:00) and `18000` midnight. It is read with the rest of the state, every
+`refresh-ticks`, so it is as old as `state.generatedAt`. `season` is absent in a world without seasons.
+`outdoor` is the climate at the world's spawn.
 
 #### Stations
 
@@ -251,6 +255,7 @@ A station:
 | --- | --- |
 | `key`, `label`, `world`, `x`, `y`, `z` | Its name and place (the key is the same kind as a device's). |
 | `enabled`, `intact`, `working` | Switched on; its tower standing; and so forecasting. When `working` is `false` there is no forecast, and `enabled` and `intact` say why. |
+| `worldTime` | **New in 0.7.4.** The in-game time of day in its world, in ticks, 0 to 23999 (`0` sunrise, `6000` noon, `12000` sunset, `18000` midnight), as of the last refresh. Optional: absent when its world is not loaded. |
 | `areaRadius` | How many blocks around it it measures. |
 | `outdoorF` | The outdoor temperature around it, optional. |
 | `lightningStrikes` | How often lightning has struck its tower. |
