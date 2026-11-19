@@ -3,7 +3,7 @@
 A web dashboard for [EZvac](https://github.com/EZvac-Plugin/EZvac). Players make a website account in
 game, claim the devices that are theirs, and sign in to see and control them: thermostats, heat pumps,
 furnaces, humidifiers and dehumidifiers, air purifiers, fridges and freezers, vents, and every sensor and
-monitor. Devices are grouped into **homes**, and each thermostat is a Nest-style dial. Thermostats also
+monitor. Devices are grouped into **homes** (which can sit in **folders** and **organizations**), and each thermostat is a Nest-style dial. Thermostats also
 show the weather and seven-day forecast from their nearest weather station, and a Weather tab shows every
 weather station to all signed-in players.
 
@@ -52,18 +52,43 @@ Don't reuse a password from anywhere else: commands you type can appear in the s
 and logs. To keep a password out of the console altogether, skip `register` and use
 **`/ezstats resetpassword`** instead: it gives you a code, and you choose the password on the website.
 
-## Homes
+## Organizations, folders and homes
 
-A home is a named group of your devices, like a Nest home: "Main house", "Cabin", "Garage". Make one
-with **New home**; the pencil renames it and **Delete** removes it (its devices aren't deleted, they go
-back to "No home"). A device's **Home** menu moves it. A home can hold any device, and the devices of
-a home are shown together: thermostats first as dials, then the other devices as tiles.
+Your devices are kept in **homes**, and homes can be gathered into **folders** and **organizations**:
 
-Homes are yours alone. Names are up to 32 characters and unique among your homes, and you can have up
-to 20. They are saved in `accounts.yml`, and a device leaves its home when it is released or removed.
+```
+Acme Co            (organization)
+├── Kyleton        (folder)
+│   └── House 1    (home)  ← your devices
+└── Depot          (folder)
+    └── Warehouse  (home)
+```
 
-**Folding a home away:** click the arrow (or the name) at the left of a home's title to hide its devices
-and click again to show them. Which homes are folded is remembered in your browser, not on the server.
+- A **home** is a named group of your devices, like a Nest home: "Main house", "Cabin", "Garage". It
+  holds any device, shown together: thermostats first as dials, then the other devices as tiles.
+- A **folder** holds homes and other folders, like a town or a street: "Kyleton" → "House 1".
+- An **organization** sits at the top and holds folders and homes: make one, then put your folders and homes
+  in it. Everything is yours alone: other players don't see your organizations, and an organization is a
+  way to arrange your own devices, not a group of players.
+
+**New organization**, **New folder** and **New home** make one; for a folder or home, **Inside** picks where
+it goes. The pencil renames, **Move** moves a folder or home (with everything in it) into an organization or
+folder, and a device's **Home** menu puts it in a home (shown with its path, "Acme Co / Kyleton / House 1").
+**Delete** removes only that group: what was in it isn't deleted, it moves up a level (a home's devices go
+back to "No home").
+
+Rules: an organization stays at the top; a folder or home goes in an organization or a folder, never inside
+itself, and no more than 5 levels deep. Names are up to 32 characters and unique among what sits side by
+side. You can have up to 10 organizations, 40 folders and 20 homes. They are saved in `accounts.yml`, and a
+device leaves its home when it is released or removed.
+
+**Changing the order:** click **Arrange**. Every device gets **◀ ▶** buttons and every organization,
+folder and home gets **▲ ▼**: they move it one place earlier or later among the ones beside it (a device
+among the devices of its home, dials among dials and tiles among tiles). Click **Done** when finished. The
+order is saved. Until you arrange them, devices are in the order you claimed them.
+
+**Folding away:** click the arrow (or the name) at the left of any title to hide what is inside, and
+click again to show it. What is folded is remembered in your browser, not on the server.
 
 ## Full screen
 
@@ -100,9 +125,8 @@ a marker, and the ticks between them lit in blue (cooling) or orange (heating).
 Since EZvac BETA 1.0 Pilot 8, a house keeps its temperature while its owner is away: thermostats keep
 calling, heat pumps and furnaces run, fridges stay cold, and humidifiers, dehumidifiers and purifiers keep
 working, even when the chunk isn't loaded. EZvac runs them from what it last saw there, and nothing is
-placed or read in an unloaded chunk. A device in that state shows a **Running while nobody is near**
-chip on its card, and you can watch and control it from the website as before. (Readings of
-thermometers and sensors still need their chunk loaded.)
+placed or read in an unloaded chunk. You can watch and control such a house from the website as
+before. (Readings of thermometers and sensors still need their chunk loaded.)
 
 ## Every device
 

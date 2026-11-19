@@ -118,14 +118,11 @@ public final class SnapshotService {
         root.addProperty("ezvacVersion", snap.ezvacVersion());
         root.addProperty("apiVersion", snap.apiVersion());
 
-        JsonArray homes = new JsonArray();
-        for (AccountStore.Home home : view.homes()) {
-            JsonObject h = new JsonObject();
-            h.addProperty("id", home.id());
-            h.addProperty("name", home.name());
-            homes.add(h);
-        }
-        root.add("homes", homes);
+        // Organizations, folders and homes, each in the order its owner arranged them and with the id of what it
+        // is in ("" at the top). A device's home is its "home" field.
+        root.add("orgs", groupsJson(view.of(AccountStore.Kind.ORG)));
+        root.add("folders", groupsJson(view.of(AccountStore.Kind.FOLDER)));
+        root.add("homes", groupsJson(view.of(AccountStore.Kind.HOME)));
 
         JsonArray devices = new JsonArray();
         Set<String> worldNames = new LinkedHashSet<>();
@@ -160,6 +157,18 @@ public final class SnapshotService {
         root.add("stations", stations);
         root.add("devices", devices);
         return GSON.toJson(root);
+    }
+
+    private static JsonArray groupsJson(List<AccountStore.Group> groups) {
+        JsonArray array = new JsonArray();
+        for (AccountStore.Group group : groups) {
+            JsonObject item = new JsonObject();
+            item.addProperty("id", group.id());
+            item.addProperty("name", group.name());
+            item.addProperty("parent", group.parent());
+            array.add(item);
+        }
+        return array;
     }
 
     /** Where the last runs of each thermostat come from. Without one, no thermostat has a log. */

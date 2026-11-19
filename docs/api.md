@@ -16,7 +16,7 @@ is built in [`SnapshotService.java`](../src/main/java/com/ezstats/snapshot/Snaps
 - [Signing in](#signing-in): [`POST /api/quicklogin`](#post-apiquicklogin), [`POST /api/reset-password`](#post-apireset-password), [`POST /api/login`](#post-apilogin), [`POST /api/logout`](#post-apilogout)
 - [Reading](#reading): [`GET /api/state`](#get-apistate), [`GET /api/weather`](#get-apiweather)
 - [Changing devices](#changing-devices): [`POST /api/device/control`](#post-apidevicecontrol)
-- [Your own data](#your-own-data): [nicknames](#post-apidevicenickname), [homes](#homes)
+- [Your own data](#your-own-data): [nicknames](#post-apidevicenickname), [organizations, folders and homes](#organizations-folders-and-homes)
 - [Static files](#static-files)
 - [Errors and status codes](#errors-and-status-codes)
 - [Limits and security](#limits-and-security)
@@ -129,7 +129,9 @@ Nothing is returned that the player doesn't own, apart from the stations their t
     "writable": true,
     "ezvacVersion": "BETA-1.0-P7",
     "apiVersion": "1.12",
-    "homes":   [ { "id": "a1b2c3d4", "name": "Main house" } ],
+    "orgs":    [ { "id": "6df481d8", "name": "Acme Co", "parent": "" } ],
+    "folders": [ { "id": "10b1597b", "name": "Kyleton", "parent": "6df481d8" } ],
+    "homes":   [ { "id": "a1b2c3d4", "name": "House 1", "parent": "10b1597b" } ],
     "devices": [ /* see Devices */ ],
     "worlds":  [ /* see Worlds */ ],
     "stations": { /* see Stations */ }
@@ -146,8 +148,8 @@ Nothing is returned that the player doesn't own, apart from the stations their t
 | `state.writable` | Whether [`POST /api/device/control`](#post-apidevicecontrol) can change anything. |
 | `state.readOnlyReason` | Only when `writable` is `false`: why, as a sentence. |
 | `state.ezvacVersion`, `state.apiVersion` | EZvac's plugin version and API version. |
-| `state.homes` | The player's homes, in the order they made them. |
-| `state.devices` | The player's devices, in the order they claimed them. |
+| `state.orgs`, `state.folders`, `state.homes` | The player's [organizations, folders and homes](#organizations-folders-and-homes), each list in the order the player arranged it, with the `parent` of each (`""` at the top). `state.homes` is the same list as before, now with `parent`; the other two are new in 0.8. |
+| `state.devices` | The player's devices, in the order they arranged them (the order they claimed them until they do). |
 | `state.worlds` | The worlds that hold those devices. |
 | `state.stations` | The weather stations those thermostats use, by station key. |
 
@@ -165,7 +167,7 @@ Every device has these fields:
 | `nickname` | Optional. The name its owner gave it. |
 | `home` | The id of the home it is in, or `""`. |
 | `weather` | Optional, thermostats only: `{ "station": "<key>", "distance": 98 }`, its nearest weather station and how many blocks away. Absent when no working station is in range. |
-| `loaded` | Optional, thermostats, equipment and units (not vents or instruments), **EZvac BETA 1.0 Pilot 8 or newer**. `true` when the device's chunk is loaded; `false` when it is running unattended: since Pilot 8 EZvac keeps a house running from what it last saw there while nobody is near, and a dashboard can say so. Absent on an older EZvac. |
+| `loaded` | Optional, thermostats, equipment and units (not vents or instruments), **EZvac BETA 1.0 Pilot 8 or newer**. `true` when the device's chunk is loaded; `false` when it is running unattended: since Pilot 8 EZvac keeps a house running from what it last saw there while nobody is near. The website doesn't show this; the field is there for other clients. Absent on an older EZvac. |
 
 **`kind: "thermostat"`**, with `type` `room` or `pool`
 
@@ -327,7 +329,7 @@ a moment later (about 350 ms is enough) for the new values.
 ## Your own data
 
 These change EZStats' own records, kept in `accounts.yml`, not EZvac. They work even when the website is
-read-only. Only your own devices and homes can be touched.
+read-only. Only your own devices, organizations, folders and homes can be touched.
 
 ### `POST /api/device/nickname`
 
@@ -339,21 +341,42 @@ Names a device you own on your page. An empty `nickname` clears it. At most 32 c
 characters; runs of spaces become one. **`200`** `{"ok":true}`; **`400`** if it is too long or has control
 characters; **`403`** if the device isn't yours.
 
-### Homes
+### Organizations, folders and homes
 
-A home is a named group of your devices. A player can have up to **20**. Names are 1 to 32 characters, no
-control characters, and unique among their homes, ignoring case.
+Three kinds of group, each with an `id`, a `name` and a `parent` (the id of what it is in, or `""` at the
+top):
+
+- an **organization** (up to **10**) sits at the top and holds folders and homes;
+- a **folder** (up to **40**) holds folders and homes;
+- a **home** (up to **20**) holds devices.
+
+Names are 1 to 32 characters, no control characters, and unique among what sits side by side (same
+`parent`), ignoring case. An organization is only at the top; a folder or home goes in an organization or a
+folder, never inside itself or what it holds, and nesting stops at 5 levels (a group's depth is 0 at the
+top, at most 4). They are the player's own: nothing is shared with other players.
 
 | Call | Body | Does |
 | --- | --- | --- |
-| `POST /api/homes` | `{ "name": "Cabin" }` | Makes a home. `200` `{"ok":true,"id":"a1b2c3d4"}`. |
-| `POST /api/homes/rename` | `{ "id": "a1b2c3d4", "name": "Lake house" }` | Renames it. |
-| `POST /api/homes/delete` | `{ "id": "a1b2c3d4" }` | Deletes it. Its devices aren't deleted: they go back to no home. |
+| `POST /api/orgs` | `{ "name": "Acme Co" }` | Makes an organization. `200` `{"ok":true,"id":"a1b2c3d4"}`. |
+| `POST /api/folders` | `{ "name": "Kyleton", "parent": "<org or folder id>" }` | Makes a folder. `parent` is optional (the top). |
+| `POST /api/homes` | `{ "name": "House 1", "parent": "<org or folder id>" }` | Makes a home. `parent` is optional. |
+| `POST /api/orgs/rename`, `/api/folders/rename`, `/api/homes/rename` | `{ "id": "a1b2c3d4", "name": "New name" }` | Renames one of that kind. |
+| `POST /api/orgs/delete`, `/api/folders/delete`, `/api/homes/delete` | `{ "id": "a1b2c3d4" }` | Deletes it. Nothing inside is deleted: it moves up to where the deleted one was (a home's devices go to no home). |
+| `POST /api/groups/move` | `{ "id": "a1b2c3d4", "parent": "<org or folder id>" }` | Moves a folder or home, with what it holds. `"parent": ""` is the top. |
+| `POST /api/groups/order` | `{ "id": "a1b2c3d4", "before": "e5f6a7b8" }` | Puts a group just before another in the same place. `"before": ""` is the end. |
 | `POST /api/device/home` | `{ "key": "7f1c...:12:64:-30", "home": "a1b2c3d4" }` | Puts a device you own in a home. `"home": ""` takes it out of any. |
+| `POST /api/device/order` | `{ "key": "7f1c...:12:64:-30", "before": "7f1c...:13:64:-30" }` | Puts a device just before another device of the same home (or both in no home). `"before": ""` is the end of its home. |
 
-Each answers **`200`** `{"ok":true}` unless noted. Errors: **`400`** for a bad name; **`404`** `No such home.`;
-**`409`** for a duplicate name (`You already have a home with that name.`) or more than 20 homes;
-**`403`** when the device isn't yours.
+A route works only on groups of its kind: `/api/homes/rename` with a folder's id is `404`.
+
+Each answers **`200`** `{"ok":true}` unless noted. Errors: **`400`** for a bad name, or `It can't go there.` (an
+organization somewhere but the top, a group inside a home, inside itself, too deep, or a `before` that
+isn't beside it); **`404`** `No such home.` (or folder, organization, group); **`409`** for a duplicate name
+or more groups of that kind than allowed; **`403`** when the device isn't yours.
+
+The order is the order of each list in [`GET /api/state`](#get-apistate): `orgs`, `folders` and `homes` are
+each in the order their owner arranged them, and `devices` in the order they arranged those (the order
+they were claimed until then).
 
 ## Static files
 

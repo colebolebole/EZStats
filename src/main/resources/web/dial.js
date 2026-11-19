@@ -232,11 +232,9 @@ function thermostatCard(t, homes) {
   if (!writable && t.profile && t.profile !== "normal") stat("Profile", cap(t.profile));
   side.appendChild(stats);
 
-  const remote = remoteChip(t);
-  if ((t.attention && t.attention.length) || remote) {
+  if (t.attention && t.attention.length) {
     const chips = el("div", "chips");
-    if (remote) chips.appendChild(remote);
-    for (const item of t.attention || []) chips.appendChild(el("span", "chip", ATTENTION[item] || item));
+    for (const item of t.attention) chips.appendChild(el("span", "chip", ATTENTION[item] || item));
     side.appendChild(chips);
   }
 

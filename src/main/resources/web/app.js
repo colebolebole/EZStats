@@ -118,7 +118,7 @@ function iconButton(label, onClick, path, extraClass) {
   return button;
 }
 
-// --- one inline text form, used to rename a device or a home and to make a home -------------------
+// --- one inline form: rename a device or group, make a group, move a group -----------------------------
 
 function endEditing() {
   editing = false;
@@ -128,18 +128,34 @@ function endEditing() {
 }
 
 /**
- * A small form with a text field. `save(value)` may throw to show its message under the field; when it
- * returns, editing ends and the page reloads from the server.
+ * A small form. It has a text field (unless `noText`) and, with `choice`, a menu of
+ * {label, options: [{value, label}], value}. `save(text, chosen)` may throw to show its message under the
+ * form; when it returns, editing ends and the page reloads from the server.
  */
-function inlineForm({ value, placeholder, label, submit, hint, save }) {
+function inlineForm({ value, placeholder, label, submit, hint, save, choice, noText }) {
   editing = true;
   const form = el("form", "rename");
-  const input = el("input");
-  input.type = "text";
-  input.maxLength = MAX_NAME;
-  input.value = value;
-  input.placeholder = placeholder;
-  input.setAttribute("aria-label", label);
+  let input = null;
+  if (!noText) {
+    input = el("input");
+    input.type = "text";
+    input.maxLength = MAX_NAME;
+    input.value = value;
+    input.placeholder = placeholder;
+    input.setAttribute("aria-label", label);
+    form.appendChild(input);
+  }
+  let select = null;
+  if (choice) {
+    const wrap = el("label", "rename-choice");
+    wrap.append(choice.label + " ");
+    select = el("select");
+    select.setAttribute("aria-label", choice.label);
+    for (const option of choice.options) select.appendChild(new Option(option.label, option.value));
+    select.value = choice.value;
+    wrap.appendChild(select);
+    form.appendChild(wrap);
+  }
   const error = el("p", "error");
   error.hidden = true;
 
@@ -149,7 +165,7 @@ function inlineForm({ value, placeholder, label, submit, hint, save }) {
   const cancel = el("button", "small", "Cancel");
   cancel.type = "button";
   actions.append(ok, cancel);
-  form.append(input, actions);
+  form.appendChild(actions);
   if (hint) form.appendChild(el("span", "rename-hint", hint));
   form.appendChild(error);
 
@@ -160,7 +176,7 @@ function inlineForm({ value, placeholder, label, submit, hint, save }) {
     ok.disabled = true;
     error.hidden = true;
     try {
-      await save(input.value);
+      await save(input ? input.value : "", select ? select.value : "");
       endEditing();
     } catch (e) {
       error.textContent = e.message;
@@ -168,7 +184,7 @@ function inlineForm({ value, placeholder, label, submit, hint, save }) {
       ok.disabled = false;
     }
   });
-  setTimeout(() => { input.focus(); input.select(); }, 0);
+  setTimeout(() => { if (input) { input.focus(); input.select(); } else if (select) select.focus(); }, 0);
   return form;
 }
 
@@ -183,32 +199,114 @@ function renameDevice(d, titles) {
   }));
 }
 
-function startNewHome() {
+// --- organizations, folders and homes ---------------------------------------------------------------
+//
+// An organization sits at the top and holds folders and homes. A folder holds folders and homes. A home holds
+// devices. Everything here is the signed-in player's own.
+
+const GROUP_API = { org: "/api/orgs", folder: "/api/folders", home: "/api/homes" };
+const GROUP_NOUN = { org: "organization", folder: "folder", home: "home" };
+const GROUP_TITLE = { org: "Organization", folder: "Folder", home: "Home" };
+
+/** Built from each snapshot: { nodes: Map(id -> node), roots, byHome: Map(id -> devices), loose }. */
+let tree = { nodes: new Map(), roots: [], byHome: new Map(), loose: [] };
+let arranging = false;      // the page is in "Arrange" mode: it shows the buttons that reorder
+const neighbors = new Map(); // device key -> where its "earlier" and "later" buttons put it (set while drawing)
+
+/** "Acme Co / Kyleton / House 1": where a group is, by name. */
+function pathOf(id) {
+  const names = [];
+  for (let node = tree.nodes.get(id), guard = 0; node && guard < 12; node = tree.nodes.get(node.parent), guard++) {
+    names.unshift(node.name);
+  }
+  return names.join(" / ");
+}
+
+/** Organizations and folders in tree order, labelled with their path, except `excludeId` and what it holds. */
+function containerChoices(excludeId) {
+  const choices = [{ value: "", label: "At the top" }];
+  const walk = (nodes) => {
+    for (const node of nodes) {
+      if (node.kind === "home" || node.id === excludeId) continue;
+      choices.push({ value: node.id, label: pathOf(node.id) });
+      walk(node.children);
+    }
+  };
+  walk(tree.roots);
+  return choices;
+}
+
+function startNew(kind) {
   if (editing) return;
+  const noun = GROUP_NOUN[kind];
   $("home-form").replaceChildren(inlineForm({
     value: "",
-    placeholder: "Home name",
-    label: "New home name",
+    placeholder: GROUP_TITLE[kind] + " name",
+    label: "New " + noun + " name",
     submit: "Create",
-    save: (value) => post("/api/homes", { name: value }),
+    // An organization is always at the top; a folder or home can go inside one.
+    choice: kind === "org" ? null : { label: "Inside", options: containerChoices(null), value: "" },
+    save: (value, parent) => post(GROUP_API[kind], kind === "org" ? { name: value } : { name: value, parent }),
   }));
 }
 
-function renameHome(home, head) {
+function renameGroup(node, head) {
   if (editing) return;
   head.replaceChildren(inlineForm({
-    value: home.name,
-    placeholder: home.name,
-    label: "Rename home " + home.name,
+    value: node.name,
+    placeholder: node.name,
+    label: "Rename " + GROUP_NOUN[node.kind] + " " + node.name,
     submit: "Save",
-    save: (value) => post("/api/homes/rename", { id: home.id, name: value }),
+    save: (value) => post(GROUP_API[node.kind] + "/rename", { id: node.id, name: value }),
   }));
 }
 
-async function deleteHome(home) {
-  if (!confirm(`Delete the home "${home.name}"? Its devices aren't deleted: they go back to "No home".`)) return;
-  try { await post("/api/homes/delete", { id: home.id }); lastKey = ""; refresh(); }
+/** Moves a folder or home, with what it holds, into an organization or folder (or to the top). */
+function startMove(node, head) {
+  if (editing) return;
+  head.replaceChildren(inlineForm({
+    noText: true,
+    label: "Move " + node.name,
+    submit: "Move",
+    choice: { label: "Move " + node.name + " into", options: containerChoices(node.id), value: node.parent },
+    save: (_, parent) => post("/api/groups/move", { id: node.id, parent }),
+  }));
+}
+
+async function deleteGroup(node) {
+  const held = {
+    org: "Its folders and homes aren't deleted: they move up to the top.",
+    folder: "What is in it isn't deleted: it moves up a level.",
+    home: `Its devices aren't deleted: they go back to "No home".`,
+  }[node.kind];
+  if (!confirm(`Delete the ${GROUP_NOUN[node.kind]} "${node.name}"? ${held}`)) return;
+  try { await post(GROUP_API[node.kind] + "/delete", { id: node.id }); lastKey = ""; refresh(); }
   catch (e) { toast(e.message); }
+}
+
+/** The groups of the same kind in the same place as this one, in order. */
+function siblingsOf(node) {
+  const parent = tree.nodes.get(node.parent);
+  return (parent ? parent.children : tree.roots).filter((other) => other.kind === node.kind);
+}
+
+/** Moves a group one place earlier (-1) or later (+1) among its siblings. */
+async function nudgeGroup(node, direction) {
+  const siblings = siblingsOf(node);
+  const at = siblings.indexOf(node);
+  const target = direction < 0 ? siblings[at - 1] : siblings[at + 2];
+  try { await post("/api/groups/order", { id: node.id, before: target ? target.id : "" }); }
+  catch (e) { toast(e.message); }
+  lastKey = "";
+  refresh();
+}
+
+/** Moves a device just before another device of its home, or to the end of it ("" for the end). */
+async function reorderDevice(d, before) {
+  try { await post("/api/device/order", { key: d.key, before }); }
+  catch (e) { toast(e.message); }
+  lastKey = "";
+  refresh();
 }
 
 async function moveToHome(d, homeId) {
@@ -631,14 +729,6 @@ function tickModeTimes() {
   }
 }
 
-/** A chip for a device whose chunk isn't loaded: EZvac keeps it running from what it last saw there. */
-function remoteChip(d) {
-  if (d.loaded !== false) return null;
-  const chip = el("span", "chip remote", "Running while nobody is near");
-  chip.title = "Its chunk isn't loaded. EZvac keeps it running from what it last saw there.";
-  return chip;
-}
-
 // --- devices: what every card shares ---------------------------------------------------------------
 
 /** What a device is called on the page: its owner's nickname, its own label, or what kind of thing it is. */
@@ -670,6 +760,12 @@ function deviceHead(d, pill) {
   titles.appendChild(el("div", "sub", deviceWhere(d).join(" · ")));
   head.appendChild(titles);
   const side = el("div", "head-side");
+  const place = !fullscreen && arranging ? neighbors.get(d.key) : null;
+  if (place) {
+    const earlier = arrowButton("Move " + title + " earlier", "◀", () => reorderDevice(d, place.earlier), !place.canEarlier);
+    const later = arrowButton("Move " + title + " later", "▶", () => reorderDevice(d, place.later), !place.canLater);
+    side.append(earlier, later);
+  }
   if (pill) side.appendChild(pill);
   if (!fullscreen && expandable(d)) {
     side.appendChild(iconButton("Open " + title + " full screen", () => { if (!editing) openDetail("device", d.key); }, EXPAND, "expand"));
@@ -727,6 +823,17 @@ function closeDetail() {
   drawDetail();
 }
 
+/** A small button with an arrow in it, for the reorder mode. */
+function arrowButton(label, glyph, onClick, disabled) {
+  const button = el("button", "edit arrow", glyph);
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.disabled = !!disabled;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
 /** The "Home" menu of a card, or null when the player has made no homes. */
 function homePicker(d, homes) {
   if (!homes.length) return null;
@@ -735,7 +842,8 @@ function homePicker(d, homes) {
   const select = el("select");
   select.setAttribute("aria-label", "Home for " + deviceName(d));
   select.appendChild(new Option("No home", ""));
-  for (const h of homes) select.appendChild(new Option(h.name, h.id));
+  // A home is named with where it is ("Acme Co / Kyleton / House 1") so two homes of one name can be told apart.
+  for (const h of homes) select.appendChild(new Option(pathOf(h.id) || h.name, h.id));
   select.value = d.home || "";
   select.addEventListener("change", () => moveToHome(d, select.value));
   label.appendChild(select);
@@ -781,23 +889,28 @@ function deviceCard(d, homes) {
   return d.kind === "thermostat" ? thermostatCard(d, homes) : deviceTile(d, homes);
 }
 
-/** Thermostats first, then humidity units and fridges, equipment, instruments, and vents last. */
-const KIND_ORDER = { thermostat: 0, unit: 1, equipment: 2, instrument: 3, vent: 4 };
-
-/** The cards of some devices: the dials in one grid, the tiles in another below it. */
+/**
+ * The cards of some devices: the dials in one grid, the tiles in another below it. Each grid is in the
+ * order its owner arranged the devices (the order they claimed them until they do), and records where the
+ * "earlier" and "later" buttons of Arrange mode put each device.
+ */
 function deviceGrids(list, homes) {
   const box = document.createDocumentFragment();
-  const sorted = [...list].sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9));
-  const dials = sorted.filter((d) => d.kind === "thermostat");
-  const tiles = sorted.filter((d) => d.kind !== "thermostat");
-  if (dials.length) {
-    const grid = el("div", "grid");
-    for (const d of dials) grid.appendChild(deviceCard(d, homes));
-    box.appendChild(grid);
-  }
-  if (tiles.length) {
-    const grid = el("div", "grid tiles");
-    for (const d of tiles) grid.appendChild(deviceCard(d, homes));
+  for (const [className, members] of [
+    ["grid", list.filter((d) => d.kind === "thermostat")],
+    ["grid tiles", list.filter((d) => d.kind !== "thermostat")],
+  ]) {
+    if (!members.length) continue;
+    const grid = el("div", className);
+    members.forEach((d, i) => {
+      neighbors.set(d.key, {
+        canEarlier: i > 0,
+        earlier: i > 0 ? members[i - 1].key : "",
+        canLater: i < members.length - 1,
+        later: i + 2 < members.length ? members[i + 2].key : "", // "" is the end of the home
+      });
+      grid.appendChild(deviceCard(d, homes));
+    });
     box.appendChild(grid);
   }
   return box;
@@ -818,16 +931,60 @@ function worldMeta(w) {
   return parts.join(" · ");
 }
 
-/** A home with the devices in it; `home` is null for the devices that are in no home. */
-function homeSection(home, list, homes) {
-  const id = home ? home.id : NO_HOME;
-  const name = home ? home.name : "No home";
-  const group = el("section", "group");
+/**
+ * Sorts the snapshot's organizations, folders and homes into a tree, and the devices into their homes. The
+ * server sends each kind in the order its owner arranged it; a group whose parent is missing goes to the top.
+ */
+function buildTree(state) {
+  const nodes = new Map();
+  for (const [kind, list] of [["org", state.orgs], ["folder", state.folders], ["home", state.homes]]) {
+    for (const g of list || []) nodes.set(g.id, { kind, id: g.id, name: g.name, parent: g.parent || "", children: [] });
+  }
+  const roots = [];
+  for (const node of nodes.values()) {
+    const holder = nodes.get(node.parent);
+    if (holder && holder.kind !== "home" && node.kind !== "org") holder.children.push(node);
+    else { node.parent = ""; roots.push(node); }
+  }
+  const byHome = new Map();
+  const loose = [];
+  for (const device of state.devices) {
+    const home = nodes.get(device.home);
+    if (home && home.kind === "home") {
+      if (!byHome.has(home.id)) byHome.set(home.id, []);
+      byHome.get(home.id).push(device);
+    } else {
+      loose.push(device);
+    }
+  }
+  return { nodes, roots, byHome, loose };
+}
+
+/** How many devices are in a group, counting what is inside the groups in it. */
+function deviceCount(node) {
+  if (node.kind === "home") return (tree.byHome.get(node.id) || []).length;
+  return node.children.reduce((sum, child) => sum + deviceCount(child), 0);
+}
+
+/** Folders before homes, each in the order its owner arranged them. */
+function orderedChildren(node) {
+  return [...node.children.filter((c) => c.kind === "folder"), ...node.children.filter((c) => c.kind === "home")];
+}
+
+/**
+ * An organization, folder or home, with what is in it: folders and homes inside the first two, devices inside a
+ * home. `node` is null for the devices that are in no home. The arrow folds it away, and the choice is
+ * remembered in this browser.
+ */
+function groupSection(node, homes, depth) {
+  const kind = node ? node.kind : "none";
+  const id = node ? node.id : NO_HOME;
+  const name = node ? node.name : "No home";
+  const group = el("section", "group group-" + kind + (depth > 0 ? " nested" : ""));
   const head = el("div", "group-head");
   const titles = el("div", "group-title");
   const content = el("div", "group-body");
 
-  // The chevron folds the home's devices away; the choice is remembered in this browser.
   const toggle = iconButton("", () => flip(), CHEVRON, "collapse");
   function sync() {
     const folded = collapsedHomes.has(id);
@@ -845,22 +1002,51 @@ function homeSection(home, list, homes) {
   }
   const heading = el("h2", "", name);
   heading.addEventListener("click", flip);
-  titles.append(toggle, heading);
-  titles.appendChild(el("span", "group-meta", `${list.length} device${list.length === 1 ? "" : "s"}`));
+  titles.append(toggle);
+  if (node) titles.appendChild(el("span", "group-kind", GROUP_TITLE[kind]));
+  titles.append(heading);
+  const count = node ? deviceCount(node) : tree.loose.length;
+  titles.appendChild(el("span", "group-meta", `${count} device${count === 1 ? "" : "s"}`));
   head.appendChild(titles);
-  if (home) {
+
+  if (node) {
     const actions = el("div", "group-actions");
-    actions.appendChild(iconButton("Rename home " + home.name, () => renameHome(home, head)));
+    if (arranging) {
+      const siblings = siblingsOf(node);
+      const at = siblings.indexOf(node);
+      actions.append(
+        arrowButton("Move " + name + " up", "▲", () => nudgeGroup(node, -1), at <= 0),
+        arrowButton("Move " + name + " down", "▼", () => nudgeGroup(node, 1), at >= siblings.length - 1));
+    }
+    actions.appendChild(iconButton("Rename " + GROUP_NOUN[kind] + " " + name, () => renameGroup(node, head)));
+    if (kind !== "org") {
+      const move = el("button", "link small-link", "Move");
+      move.type = "button";
+      move.title = "Move " + name + " into an organization or folder";
+      move.addEventListener("click", () => startMove(node, head));
+      actions.appendChild(move);
+    }
     const del = el("button", "link small-link", "Delete");
     del.type = "button";
-    del.addEventListener("click", () => deleteHome(home));
+    del.addEventListener("click", () => deleteGroup(node));
     actions.appendChild(del);
     head.appendChild(actions);
   }
-  if (list.length === 0) {
-    content.appendChild(el("p", "home-empty", "Nothing here yet. Use the Home menu on a device to move it in."));
+
+  if (kind === "org" || kind === "folder") {
+    const kids = orderedChildren(node);
+    if (kids.length === 0) {
+      content.appendChild(el("p", "home-empty",
+        `Nothing in this ${GROUP_NOUN[kind]} yet. Make a folder or home inside it with New, or use Move on one.`));
+    }
+    for (const child of kids) content.appendChild(groupSection(child, homes, depth + 1));
   } else {
-    content.appendChild(deviceGrids(list, homes));
+    const list = node ? tree.byHome.get(node.id) || [] : tree.loose;
+    if (list.length === 0) {
+      content.appendChild(el("p", "home-empty", "Nothing here yet. Use the Home menu on a device to move it in."));
+    } else {
+      content.appendChild(deviceGrids(list, homes));
+    }
   }
   group.append(head, content);
   sync();
@@ -903,20 +1089,24 @@ function render(d) {
   }
 
   const homes = state.homes || [];
-  // Forget folded homes that no longer exist.
+  tree = buildTree(state);
+  neighbors.clear();
+  // Forget folded groups that no longer exist.
   const before = collapsedHomes.size;
-  for (const id of [...collapsedHomes]) if (id !== NO_HOME && !homes.some((h) => h.id === id)) collapsedHomes.delete(id);
+  for (const id of [...collapsedHomes]) if (id !== NO_HOME && !tree.nodes.has(id)) collapsedHomes.delete(id);
   if (collapsedHomes.size !== before) saveCollapsed();
+  $("arrange").setAttribute("aria-pressed", String(arranging));
+  $("arrange").textContent = arranging ? "Done" : "Arrange";
   const groups = $("groups");
   groups.replaceChildren();
-  if (homes.length === 0) {
+  if (tree.nodes.size === 0) {
     if (state.devices.length) groups.appendChild(deviceGrids(state.devices, homes));
   } else {
-    const byHome = new Map(homes.map((h) => [h.id, []]));
-    const loose = [];
-    for (const device of state.devices) (byHome.get(device.home) || loose).push(device);
-    for (const h of homes) groups.appendChild(homeSection(h, byHome.get(h.id), homes));
-    if (loose.length) groups.appendChild(homeSection(null, loose, homes));
+    // Organizations first, then folders, then homes at the top; the devices in no home come last.
+    const top = [...tree.roots.filter((n) => n.kind === "org"), ...tree.roots.filter((n) => n.kind === "folder"),
+      ...tree.roots.filter((n) => n.kind === "home")];
+    for (const node of top) groups.appendChild(groupSection(node, homes, 0));
+    if (tree.loose.length) groups.appendChild(groupSection(null, homes, 0));
   }
   $("empty").hidden = state.devices.length > 0;
   drawDetail();
@@ -947,7 +1137,7 @@ async function refresh() {
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
     const s = d.state;
     if (Number.isFinite(s.generatedAt)) skewMs = s.generatedAt - Date.now();
-    const key = JSON.stringify([s.devices, s.worlds, s.homes, s.stations, d.player]);
+    const key = JSON.stringify([s.devices, s.worlds, s.orgs, s.folders, s.homes, s.stations, d.player]);
     if (key !== lastKey) { lastKey = key; render(d); }
     else stamp(s);
   } catch (e) {
@@ -960,7 +1150,13 @@ document.addEventListener("keydown", (event) => {
   // Escape inside a rename form cancels the rename, not the full-screen view behind it.
   if (event.key === "Escape" && detail && !editing && !(event.target.closest && event.target.closest("form.rename"))) closeDetail();
 });
-$("new-home").addEventListener("click", startNewHome);
+$("new-org").addEventListener("click", () => startNew("org"));
+$("new-folder").addEventListener("click", () => startNew("folder"));
+$("new-home").addEventListener("click", () => startNew("home"));
+$("arrange").addEventListener("click", () => {
+  arranging = !arranging;
+  if (data) { lastKey = ""; render(data); }
+});
 $("tab-devices").addEventListener("click", () => showTab("devices"));
 $("tab-weather").addEventListener("click", () => showTab("weather"));
 $("wx-search").addEventListener("input", (event) => { wxSearch = event.target.value; drawWeather(); });

@@ -37,7 +37,9 @@ import java.util.logging.Logger;
  *   <li>{@code GET /api/state} the devices, homes and nearest weather stations of the signed-in player</li>
  *   <li>{@code GET /api/weather} every weather station and its forecast</li>
  *   <li>{@code POST /api/device/control} changes a device, through the {@link DeviceControl}</li>
- *   <li>{@code POST /api/device/nickname}, {@code /api/device/home} and {@code /api/homes...} are the owner's own data</li>
+ *   <li>{@code POST /api/device/nickname}, {@code /api/device/home}, {@code /api/device/order},
+ *       {@code /api/orgs...}, {@code /api/folders...}, {@code /api/homes...} and {@code /api/groups/move} and
+ *       {@code /api/groups/order} are the owner's own data</li>
  * </ul>
  *
  * <p>Every {@code POST} needs the header {@code X-EZStats} and a JSON body of at most 4096 bytes. Keep
@@ -135,12 +137,30 @@ public final class WebServer {
                 nickname(exchange);
             } else if (method.equals("POST") && path.equals("/api/device/home")) {
                 deviceHome(exchange);
+            } else if (method.equals("POST") && path.equals("/api/device/order")) {
+                deviceOrder(exchange);
             } else if (method.equals("POST") && path.equals("/api/homes")) {
-                homeCreate(exchange);
+                groupCreate(exchange, AccountStore.Kind.HOME);
             } else if (method.equals("POST") && path.equals("/api/homes/rename")) {
-                homeRename(exchange);
+                groupRename(exchange, AccountStore.Kind.HOME);
             } else if (method.equals("POST") && path.equals("/api/homes/delete")) {
-                homeDelete(exchange);
+                groupDelete(exchange, AccountStore.Kind.HOME);
+            } else if (method.equals("POST") && path.equals("/api/folders")) {
+                groupCreate(exchange, AccountStore.Kind.FOLDER);
+            } else if (method.equals("POST") && path.equals("/api/folders/rename")) {
+                groupRename(exchange, AccountStore.Kind.FOLDER);
+            } else if (method.equals("POST") && path.equals("/api/folders/delete")) {
+                groupDelete(exchange, AccountStore.Kind.FOLDER);
+            } else if (method.equals("POST") && path.equals("/api/orgs")) {
+                groupCreate(exchange, AccountStore.Kind.ORG);
+            } else if (method.equals("POST") && path.equals("/api/orgs/rename")) {
+                groupRename(exchange, AccountStore.Kind.ORG);
+            } else if (method.equals("POST") && path.equals("/api/orgs/delete")) {
+                groupDelete(exchange, AccountStore.Kind.ORG);
+            } else if (method.equals("POST") && path.equals("/api/groups/move")) {
+                groupMove(exchange);
+            } else if (method.equals("POST") && path.equals("/api/groups/order")) {
+                groupOrder(exchange);
             } else if (method.equals("POST") && path.equals("/api/login")) {
                 login(exchange);
             } else if (method.equals("POST") && path.equals("/api/quicklogin")) {
@@ -537,38 +557,46 @@ public final class WebServer {
         json(exchange, 200, "{\"ok\":true}");
     }
 
-    // --- homes: EZStats' own data, so they work while EZvac's API is read-only -----------------
+    // --- organizations, folders and homes: EZStats' own data, so they work while EZvac's API is read-only --
 
-    /** {@code POST /api/homes {name}} makes a home and answers with its id. */
-    private void homeCreate(HttpExchange exchange) throws IOException {
+    /**
+     * {@code POST /api/orgs}, {@code /api/folders} or {@code /api/homes} {@code {name, parent?}} makes one,
+     * inside the organization or folder {@code parent} (none: the top), and answers with its id.
+     */
+    private void groupCreate(HttpExchange exchange, AccountStore.Kind kind) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
-        String name = homeName(exchange, call);
+        String name = groupName(exchange, call, kind);
         if (name == null) return;
-        AccountStore.HomeChange change = accounts.createHome(call.session().player(), call.session().name(), name);
-        if (change.status() != AccountStore.HomeStatus.OK) {
-            homeError(exchange, change.status());
+        String parent = text(call.body(), "parent");
+        AccountStore.GroupChange change = accounts.create(call.session().player(), call.session().name(), kind, name,
+                parent == null ? "" : parent);
+        if (change.status() != AccountStore.GroupStatus.OK) {
+            groupError(exchange, change.status(), kind);
             return;
         }
         json(exchange, 200, "{\"ok\":true,\"id\":" + GSON.toJson(change.id()) + "}");
     }
 
-    /** {@code POST /api/homes/rename {id, name}}. */
-    private void homeRename(HttpExchange exchange) throws IOException {
+    /** {@code POST /api/orgs/rename}, {@code /api/folders/rename} or {@code /api/homes/rename} {@code {id, name}}. */
+    private void groupRename(HttpExchange exchange, AccountStore.Kind kind) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
         String id = text(call.body(), "id");
-        String name = id == null ? null : homeName(exchange, call);
         if (id == null) {
             json(exchange, 400, error("Bad request"));
             return;
         }
+        String name = groupName(exchange, call, kind);
         if (name == null) return;
-        homeResult(exchange, accounts.renameHome(call.session().player(), id, name));
+        groupResult(exchange, accounts.rename(call.session().player(), kind, id, name), kind);
     }
 
-    /** {@code POST /api/homes/delete {id}}: its devices go back to being in no home. */
-    private void homeDelete(HttpExchange exchange) throws IOException {
+    /**
+     * {@code POST /api/orgs/delete}, {@code /api/folders/delete} or {@code /api/homes/delete} {@code {id}}.
+     * Nothing inside is deleted: it moves up to where the deleted one was (a home's devices to no home).
+     */
+    private void groupDelete(HttpExchange exchange, AccountStore.Kind kind) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
         String id = text(call.body(), "id");
@@ -576,7 +604,33 @@ public final class WebServer {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        homeResult(exchange, accounts.deleteHome(call.session().player(), id));
+        groupResult(exchange, accounts.delete(call.session().player(), kind, id), kind);
+    }
+
+    /** {@code POST /api/groups/move {id, parent}}: a folder or home into an organization or folder; "" for the top. */
+    private void groupMove(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String id = text(call.body(), "id");
+        String parent = text(call.body(), "parent");
+        if (id == null || parent == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        groupResult(exchange, accounts.move(call.session().player(), id, parent), null);
+    }
+
+    /** {@code POST /api/groups/order {id, before}}: just before a group in the same place; "" for the end. */
+    private void groupOrder(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String id = text(call.body(), "id");
+        String before = text(call.body(), "before");
+        if (id == null || before == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        groupResult(exchange, accounts.reorderGroup(call.session().player(), id, before), null);
     }
 
     /** {@code POST /api/device/home {key, home}}: "" for no home. */
@@ -589,31 +643,52 @@ public final class WebServer {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        homeResult(exchange, accounts.setHome(call.session().player(), key, home));
+        groupResult(exchange, accounts.setHome(call.session().player(), key, home), AccountStore.Kind.HOME);
     }
 
-    /** A home's name from the body's "name", tidied. Answers the client and returns null if it isn't allowed. */
-    private String homeName(HttpExchange exchange, Call call) throws IOException {
+    /** {@code POST /api/device/order {key, before}}: just before another device of the same home; "" for the end. */
+    private void deviceOrder(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String key = text(call.body(), "key");
+        String before = text(call.body(), "before");
+        if (key == null || before == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        groupResult(exchange, accounts.reorderDevice(call.session().player(), key, before), AccountStore.Kind.HOME);
+    }
+
+    /** A name from the body's "name", tidied. Answers the client and returns null if it isn't allowed. */
+    private String groupName(HttpExchange exchange, Call call, AccountStore.Kind kind) throws IOException {
         String raw = text(call.body(), "name");
         String name = raw == null ? null : Nicknames.clean(raw);
         if (name == null || name.isEmpty()) {
-            json(exchange, 400, error("A home's name is 1 to " + Nicknames.MAX_LENGTH
-                    + " characters, with no control characters."));
+            json(exchange, 400, error("Name the " + kind.noun() + " with 1 to " + Nicknames.MAX_LENGTH
+                    + " characters, and no control characters."));
             return null;
         }
         return name;
     }
 
-    private void homeResult(HttpExchange exchange, AccountStore.HomeStatus status) throws IOException {
-        if (status == AccountStore.HomeStatus.OK) json(exchange, 200, "{\"ok\":true}");
-        else homeError(exchange, status);
+    private void groupResult(HttpExchange exchange, AccountStore.GroupStatus status, AccountStore.Kind kind)
+            throws IOException {
+        if (status == AccountStore.GroupStatus.OK) json(exchange, 200, "{\"ok\":true}");
+        else groupError(exchange, status, kind);
     }
 
-    private void homeError(HttpExchange exchange, AccountStore.HomeStatus status) throws IOException {
+    /** {@code kind} is what the call was about, or null for a call that works on any (a move). */
+    private void groupError(HttpExchange exchange, AccountStore.GroupStatus status, AccountStore.Kind kind)
+            throws IOException {
+        String noun = kind == null ? "group" : kind.noun();
         switch (status) {
-            case LIMIT -> json(exchange, 409, error("You can have up to " + AccountStore.MAX_HOMES + " homes."));
-            case DUPLICATE -> json(exchange, 409, error("You already have a home with that name."));
-            case NOT_FOUND -> json(exchange, 404, error("No such home."));
+            case LIMIT -> json(exchange, 409, error("You can have up to " + (kind == null ? 0 : kind.limit()) + " "
+                    + noun + "s."));
+            case DUPLICATE -> json(exchange, 409, error("Something next to it already has that name."));
+            case NOT_FOUND -> json(exchange, 404, error("No such " + noun + "."));
+            case INVALID -> json(exchange, 400, error("It can't go there. An organization stays at the top; "
+                    + "a folder or home goes in an organization or a folder, never inside itself, "
+                    + "and no more than " + (AccountStore.MAX_DEPTH + 1) + " levels deep."));
             default -> json(exchange, 403, error("That device isn't yours. Claim it in game with /ezstats own."));
         }
     }

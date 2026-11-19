@@ -66,7 +66,13 @@
         <div class="page-head">
           <div class="title-row">
             <h1>Your devices</h1>
-            <button id="new-home" type="button" class="small">New home</button>
+            <div class="title-actions">
+              <button id="arrange" type="button" class="small" aria-pressed="false"
+                      title="Show buttons that change the order of devices, homes and folders">Arrange</button>
+              <button id="new-org" type="button" class="small">New organization</button>
+              <button id="new-folder" type="button" class="small">New folder</button>
+              <button id="new-home" type="button" class="small">New home</button>
+            </div>
           </div>
           <p id="readonly" class="note" hidden>Changing devices is not available.
             You can rename devices and sort them into homes here.</p>

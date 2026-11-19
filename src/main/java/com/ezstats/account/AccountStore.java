@@ -22,8 +22,8 @@ import java.util.logging.Logger;
 
 /**
  * Website accounts: a Minecraft player, an optional password, the devices they own (thermostats,
- * equipment, humidifiers, sensors, any EZvac device), the nicknames they gave them, and the homes
- * they keep them in. Kept in {@code accounts.yml}. Called from the main thread (commands, events)
+ * equipment, humidifiers, sensors, any EZvac device), the nicknames they gave them, and the
+ * organizations, folders and homes they keep them in (and the order of both). Kept in {@code accounts.yml}. Called from the main thread (commands, events)
  * and from web threads (login, the dashboard), so every method is synchronized.
  *
  * <p>A device is named by its key: its world and block (see {@code SnapshotService.key}).
@@ -35,8 +35,8 @@ public final class AccountStore {
         final Set<String> owned = new LinkedHashSet<>();
         /** A device's key to the nickname its owner gave it. Only owned devices have one. */
         final Map<String, String> nicknames = new LinkedHashMap<>();
-        /** The account's homes, in the order they were made. */
-        final List<Home> homes = new ArrayList<>();
+        /** The account's organizations, folders and homes, in the order they were made. */
+        final List<Group> groups = new ArrayList<>();
         /** A device's key to the id of the home it is in. A device in no home has no entry. */
         final Map<String, String> homeOf = new LinkedHashMap<>();
     }
@@ -47,20 +47,55 @@ public final class AccountStore {
     }
 
     public static final int MAX_HOMES = 20;
+    public static final int MAX_FOLDERS = 40;
+    public static final int MAX_ORGS = 10;
+    /** How deep things nest: a top-level group is depth 0, and nothing goes deeper than this. */
+    public static final int MAX_DEPTH = 4;
 
-    /** A home a player keeps their devices in. The id is what the website uses. */
-    public record Home(String id, String name) {}
+    /**
+     * What a group is. An organization sits at the top. A folder goes in an organization or another folder (or
+     * at the top). A home goes in an organization or a folder (or at the top) and holds devices.
+     */
+    public enum Kind {
+        ORG, FOLDER, HOME;
+
+        public int limit() {
+            return switch (this) {
+                case ORG -> MAX_ORGS;
+                case FOLDER -> MAX_FOLDERS;
+                case HOME -> MAX_HOMES;
+            };
+        }
+
+        public String noun() {
+            return switch (this) {
+                case ORG -> "organization";
+                case FOLDER -> "folder";
+                case HOME -> "home";
+            };
+        }
+    }
+
+    /**
+     * An organization, folder or home a player made. The id is what the website uses; {@code parent} is the id
+     * of the organization or folder it is in, or "" at the top.
+     */
+    public record Group(String id, String name, Kind kind, String parent) {}
 
     /** One owned device as its owner sees it: its nickname ("" for none) and home id ("" for none). */
     public record Item(String key, String nickname, String home) {}
 
-    /** Everything the website needs of an account: the devices in claim order, and the homes. */
-    public record View(List<Item> devices, List<Home> homes) {}
+    /** Everything the website needs of an account: the devices in claim order, and the groups. */
+    public record View(List<Item> devices, List<Group> groups) {
+        public List<Group> of(Kind kind) {
+            return groups.stream().filter(group -> group.kind() == kind).toList();
+        }
+    }
 
-    public enum HomeStatus { OK, LIMIT, DUPLICATE, NOT_FOUND, NOT_OWNED }
+    public enum GroupStatus { OK, LIMIT, DUPLICATE, NOT_FOUND, NOT_OWNED, INVALID }
 
-    /** What a home change did. {@code id} is the home the change made or touched. */
-    public record HomeChange(HomeStatus status, String id) {}
+    /** What a change to the groups did. {@code id} is the group the change made or touched. */
+    public record GroupChange(GroupStatus status, String id) {}
 
     private final File file;
     private final Logger log;
@@ -97,11 +132,27 @@ public final class AccountStore {
                 // Homes were called folders before 0.6.1: read them as homes, and save them as homes.
                 boolean oldNames = !entry.contains("homes") && entry.contains("folders");
                 migrated |= oldNames || !entry.contains("devices");
-                for (Map<?, ?> home : entry.getMapList(oldNames ? "folders" : "homes")) {
-                    Object homeId = home.get("id");
-                    Object homeName = home.get("name");
-                    if (homeId != null && homeName != null) {
-                        account.homes.add(new Home(homeId.toString(), homeName.toString()));
+                if (entry.contains("groups")) {
+                    // From 0.8: organizations, folders and homes, each with the group it is in.
+                    for (Map<?, ?> group : entry.getMapList("groups")) {
+                        Object groupId = group.get("id");
+                        Object groupName = group.get("name");
+                        Kind kind = kindOf(group.get("kind"));
+                        Object parent = group.get("parent");
+                        if (groupId != null && groupName != null && kind != null) {
+                            account.groups.add(new Group(groupId.toString(), groupName.toString(), kind,
+                                    parent == null ? "" : parent.toString()));
+                        }
+                    }
+                    repairGroups(account);
+                } else {
+                    // Before 0.8 there were only homes, all at the top.
+                    for (Map<?, ?> home : entry.getMapList(oldNames ? "folders" : "homes")) {
+                        Object homeId = home.get("id");
+                        Object homeName = home.get("name");
+                        if (homeId != null && homeName != null) {
+                            account.groups.add(new Group(homeId.toString(), homeName.toString(), Kind.HOME, ""));
+                        }
                     }
                 }
                 for (Map<?, ?> placed : entry.getMapList(oldNames ? "folder-of" : "home-of")) {
@@ -194,60 +245,249 @@ public final class AccountStore {
         return changed;
     }
 
-    // --- homes ----------------------------------------------------------------------------
+    // --- organizations, folders and homes ------------------------------------------------------
 
-    /** Makes a home. {@code playerName} is for an account that doesn't exist yet. */
-    public synchronized HomeChange createHome(UUID player, String playerName, String name) {
+    /**
+     * Makes an organization, folder or home inside {@code parent} (an organization or folder id; "" for the
+     * top). {@code playerName} is for an account that doesn't exist yet.
+     */
+    public synchronized GroupChange create(UUID player, String playerName, Kind kind, String name, String parent) {
         Account account = account(player, playerName);
-        if (account.homes.size() >= MAX_HOMES) return new HomeChange(HomeStatus.LIMIT, "");
-        if (nameTaken(account, name, null)) return new HomeChange(HomeStatus.DUPLICATE, "");
-        Home home = new Home(UUID.randomUUID().toString().substring(0, 8), name);
-        account.homes.add(home);
+        if (account.groups.stream().filter(group -> group.kind() == kind).count() >= kind.limit()) {
+            return new GroupChange(GroupStatus.LIMIT, "");
+        }
+        GroupStatus fits = fits(account, kind, null, parent);
+        if (fits != GroupStatus.OK) return new GroupChange(fits, "");
+        if (nameTaken(account, name, parent, null)) return new GroupChange(GroupStatus.DUPLICATE, "");
+        Group group = new Group(newId(account), name, kind, parent);
+        account.groups.add(group);
         save();
-        return new HomeChange(HomeStatus.OK, home.id());
+        return new GroupChange(GroupStatus.OK, group.id());
     }
 
-    public synchronized HomeStatus renameHome(UUID player, String id, String name) {
+    /** Renames a group of the given kind. */
+    public synchronized GroupStatus rename(UUID player, Kind kind, String id, String name) {
         Account account = accounts.get(player);
-        if (account == null || !hasHome(account, id)) return HomeStatus.NOT_FOUND;
-        if (nameTaken(account, name, id)) return HomeStatus.DUPLICATE;
-        account.homes.replaceAll(home -> home.id().equals(id) ? new Home(id, name) : home);
+        Group group = account == null ? null : find(account, kind, id);
+        if (group == null) return GroupStatus.NOT_FOUND;
+        if (nameTaken(account, name, group.parent(), id)) return GroupStatus.DUPLICATE;
+        replace(account, new Group(id, name, group.kind(), group.parent()));
         save();
-        return HomeStatus.OK;
+        return GroupStatus.OK;
     }
 
-    /** Deletes a home. Its devices aren't deleted: they go back to being in no home. */
-    public synchronized HomeStatus deleteHome(UUID player, String id) {
+    /**
+     * Deletes a group of the given kind. Nothing inside it is deleted: what it held moves up to where it was
+     * (a deleted home's devices go back to being in no home).
+     */
+    public synchronized GroupStatus delete(UUID player, Kind kind, String id) {
         Account account = accounts.get(player);
-        if (account == null || !hasHome(account, id)) return HomeStatus.NOT_FOUND;
-        account.homes.removeIf(home -> home.id().equals(id));
-        account.homeOf.values().removeIf(id::equals);
+        Group group = account == null ? null : find(account, kind, id);
+        if (group == null) return GroupStatus.NOT_FOUND;
+        account.groups.replaceAll(g -> g.parent().equals(id) ? new Group(g.id(), g.name(), g.kind(), group.parent()) : g);
+        account.groups.removeIf(g -> g.id().equals(id));
+        if (kind == Kind.HOME) account.homeOf.values().removeIf(id::equals);
         save();
-        return HomeStatus.OK;
+        return GroupStatus.OK;
+    }
+
+    /**
+     * Moves a folder or home (with everything in it) into an organization or folder, or to the top when
+     * {@code parent} is empty. An organization stays at the top, and nothing goes inside itself.
+     */
+    public synchronized GroupStatus move(UUID player, String id, String parent) {
+        Account account = accounts.get(player);
+        Group group = account == null ? null : byId(account, id);
+        if (group == null) return GroupStatus.NOT_FOUND;
+        GroupStatus fits = fits(account, group.kind(), id, parent);
+        if (fits != GroupStatus.OK) return fits;
+        if (nameTaken(account, group.name(), parent, id)) return GroupStatus.DUPLICATE;
+        replace(account, new Group(id, group.name(), group.kind(), parent));
+        save();
+        return GroupStatus.OK;
     }
 
     /** Puts an owned device in a home, or in none when {@code homeId} is empty. */
-    public synchronized HomeStatus setHome(UUID player, String key, String homeId) {
+    public synchronized GroupStatus setHome(UUID player, String key, String homeId) {
         Account account = accounts.get(player);
-        if (account == null || !account.owned.contains(key)) return HomeStatus.NOT_OWNED;
+        if (account == null || !account.owned.contains(key)) return GroupStatus.NOT_OWNED;
         if (homeId.isEmpty()) {
             account.homeOf.remove(key);
         } else {
-            if (!hasHome(account, homeId)) return HomeStatus.NOT_FOUND;
+            if (!hasHome(account, homeId)) return GroupStatus.NOT_FOUND;
             account.homeOf.put(key, homeId);
         }
         save();
-        return HomeStatus.OK;
+        return GroupStatus.OK;
+    }
+
+    // --- order -----------------------------------------------------------------------------
+
+    /**
+     * Moves an owned device to just before another of the same home, or to the end of its home when
+     * {@code before} is empty. The order is the order of the account's devices, which is saved.
+     */
+    public synchronized GroupStatus reorderDevice(UUID player, String key, String before) {
+        Account account = accounts.get(player);
+        if (account == null || !account.owned.contains(key)) return GroupStatus.NOT_OWNED;
+        if (key.equals(before)) return GroupStatus.OK;
+        if (!before.isEmpty()) {
+            if (!account.owned.contains(before)) return GroupStatus.NOT_FOUND;
+            if (!account.homeOf.getOrDefault(key, "").equals(account.homeOf.getOrDefault(before, ""))) {
+                return GroupStatus.INVALID; // only within a home
+            }
+        }
+        List<String> order = new ArrayList<>(account.owned);
+        order.remove(key);
+        if (before.isEmpty()) {
+            // The end of its home: just after the last device that shares it.
+            String home = account.homeOf.getOrDefault(key, "");
+            int at = 0;
+            for (int i = 0; i < order.size(); i++) {
+                if (account.homeOf.getOrDefault(order.get(i), "").equals(home)) at = i + 1;
+            }
+            order.add(at, key);
+        } else {
+            order.add(order.indexOf(before), key);
+        }
+        account.owned.clear();
+        account.owned.addAll(order);
+        save();
+        return GroupStatus.OK;
+    }
+
+    /**
+     * Moves an organization, folder or home to just before another group in the same place, or to the end of
+     * what sits there when {@code before} is empty.
+     */
+    public synchronized GroupStatus reorderGroup(UUID player, String id, String before) {
+        Account account = accounts.get(player);
+        Group group = account == null ? null : byId(account, id);
+        if (group == null) return GroupStatus.NOT_FOUND;
+        if (id.equals(before)) return GroupStatus.OK;
+        if (!before.isEmpty()) {
+            Group other = byId(account, before);
+            if (other == null) return GroupStatus.NOT_FOUND;
+            if (!other.parent().equals(group.parent())) return GroupStatus.INVALID;
+        }
+        account.groups.remove(group);
+        if (before.isEmpty()) {
+            int at = 0;
+            for (int i = 0; i < account.groups.size(); i++) {
+                if (account.groups.get(i).parent().equals(group.parent())) at = i + 1;
+            }
+            account.groups.add(at, group);
+        } else {
+            int target = 0;
+            for (int i = 0; i < account.groups.size(); i++) if (account.groups.get(i).id().equals(before)) target = i;
+            account.groups.add(target, group);
+        }
+        save();
+        return GroupStatus.OK;
+    }
+
+    private static Group byId(Account account, String id) {
+        for (Group group : account.groups) if (group.id().equals(id)) return group;
+        return null;
+    }
+
+    private static Group find(Account account, Kind kind, String id) {
+        Group group = byId(account, id);
+        return group != null && group.kind() == kind ? group : null;
     }
 
     private static boolean hasHome(Account account, String id) {
-        return account.homes.stream().anyMatch(home -> home.id().equals(id));
+        return find(account, Kind.HOME, id) != null;
     }
 
-    /** Home names are unique per account, ignoring case. {@code exceptId} is the home being renamed. */
-    private static boolean nameTaken(Account account, String name, String exceptId) {
-        return account.homes.stream()
-                .anyMatch(home -> !home.id().equals(exceptId) && home.name().equalsIgnoreCase(name));
+    private static void replace(Account account, Group changed) {
+        account.groups.replaceAll(group -> group.id().equals(changed.id()) ? changed : group);
+    }
+
+    private static String newId(Account account) {
+        String id;
+        do {
+            id = UUID.randomUUID().toString().substring(0, 8);
+        } while (byId(account, id) != null);
+        return id;
+    }
+
+    /** How many groups it is inside: 0 at the top. Stops at a loop, which a saved file could contain. */
+    private static int depth(Account account, String id) {
+        int depth = 0;
+        Group group = byId(account, id);
+        while (group != null && !group.parent().isEmpty() && depth <= MAX_DEPTH + 1) {
+            depth++;
+            group = byId(account, group.parent());
+        }
+        return depth;
+    }
+
+    /** How many levels of groups are below this one: 0 for a home, or for an empty folder. */
+    private static int height(Account account, String id, int guard) {
+        if (guard > MAX_DEPTH + 1) return 0;
+        int tallest = -1;
+        for (Group group : account.groups) {
+            if (group.parent().equals(id)) tallest = Math.max(tallest, height(account, group.id(), guard + 1));
+        }
+        return tallest + 1;
+    }
+
+    /** Whether {@code candidate} is {@code id} or inside it. */
+    private static boolean inside(Account account, String candidate, String id) {
+        String at = candidate;
+        for (int steps = 0; steps <= MAX_DEPTH + 2 && at != null && !at.isEmpty(); steps++) {
+            if (at.equals(id)) return true;
+            Group group = byId(account, at);
+            at = group == null ? null : group.parent();
+        }
+        return false;
+    }
+
+    /**
+     * Whether a group of this kind may go in {@code parent}: an organization only at the top, a folder or home
+     * in an organization or folder; never inside itself or what it holds, and not so deep that the page
+     * becomes a maze. {@code selfId} is the group being moved, null for a new one.
+     */
+    private static GroupStatus fits(Account account, Kind kind, String selfId, String parent) {
+        if (parent.isEmpty()) return GroupStatus.OK;
+        if (kind == Kind.ORG) return GroupStatus.INVALID;
+        Group holder = byId(account, parent);
+        if (holder == null) return GroupStatus.NOT_FOUND;
+        if (holder.kind() == Kind.HOME) return GroupStatus.INVALID;
+        if (selfId != null && inside(account, parent, selfId)) return GroupStatus.INVALID;
+        int below = selfId == null ? 0 : height(account, selfId, 0);
+        if (depth(account, parent) + 1 + below > MAX_DEPTH) return GroupStatus.INVALID;
+        return GroupStatus.OK;
+    }
+
+    /** Names are unique among what sits side by side, ignoring case. {@code exceptId} is the group being renamed. */
+    private static boolean nameTaken(Account account, String name, String parent, String exceptId) {
+        return account.groups.stream().anyMatch(group -> !group.id().equals(exceptId)
+                && group.parent().equals(parent) && group.name().equalsIgnoreCase(name));
+    }
+
+    private static Kind kindOf(Object value) {
+        if (value == null) return null;
+        try {
+            return Kind.valueOf(value.toString().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Makes a loaded set of groups sane: a parent that doesn't exist, isn't an organization or folder, would
+     * put an organization somewhere but the top, or sits in a loop, is dropped (the group goes to the top).
+     */
+    private static void repairGroups(Account account) {
+        for (Group group : List.copyOf(account.groups)) {
+            if (group.parent().isEmpty()) continue;
+            Group holder = byId(account, group.parent());
+            boolean bad = holder == null || holder.kind() == Kind.HOME || group.kind() == Kind.ORG
+                    || inside(account, group.parent(), group.id()) || depth(account, group.id()) > MAX_DEPTH;
+            if (bad) replace(account, new Group(group.id(), group.name(), group.kind(), ""));
+        }
     }
 
     // --- nicknames ------------------------------------------------------------------------
@@ -265,7 +505,7 @@ public final class AccountStore {
         return true;
     }
 
-    /** What the website shows a player: their devices in the order they claimed them, and their homes. */
+    /** What the website shows a player: their devices in the order they claimed them, and their groups. */
     public synchronized View view(UUID player) {
         Account account = accounts.get(player);
         if (account == null) return new View(List.of(), List.of());
@@ -273,7 +513,7 @@ public final class AccountStore {
         for (String key : account.owned) {
             items.add(new Item(key, account.nicknames.getOrDefault(key, ""), account.homeOf.getOrDefault(key, "")));
         }
-        return new View(items, List.copyOf(account.homes));
+        return new View(items, List.copyOf(account.groups));
     }
 
     /** Every device anyone owns: only these are read from EZvac. */
@@ -309,8 +549,19 @@ public final class AccountStore {
                 nicknames.add(Map.of("key", nickname.getKey(), "name", nickname.getValue()));
             }
             if (!nicknames.isEmpty()) yaml.set(base + ".nicknames", nicknames);
+            List<Map<String, String>> groups = new ArrayList<>();
             List<Map<String, String>> homes = new ArrayList<>();
-            for (Home home : account.homes) homes.add(Map.of("id", home.id(), "name", home.name()));
+            for (Group group : account.groups) {
+                Map<String, String> item = new LinkedHashMap<>();
+                item.put("id", group.id());
+                item.put("name", group.name());
+                item.put("kind", group.kind().name().toLowerCase(java.util.Locale.ROOT));
+                item.put("parent", group.parent());
+                groups.add(item);
+                if (group.kind() == Kind.HOME) homes.add(Map.of("id", group.id(), "name", group.name()));
+            }
+            if (!groups.isEmpty()) yaml.set(base + ".groups", groups);
+            // Before 0.8 there were only homes: keep that list too, so going back to an older EZStats keeps them.
             if (!homes.isEmpty()) yaml.set(base + ".homes", homes);
             List<Map<String, String>> placed = new ArrayList<>();
             for (Map.Entry<String, String> in : account.homeOf.entrySet()) {
