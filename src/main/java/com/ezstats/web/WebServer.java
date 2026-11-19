@@ -38,6 +38,7 @@ import java.util.logging.Logger;
  *   <li>{@code GET /api/weather} every weather station and its forecast</li>
  *   <li>{@code POST /api/device/control} changes a device, through the {@link DeviceControl}</li>
  *   <li>{@code POST /api/device/nickname}, {@code /api/device/home}, {@code /api/device/order},
+ *       {@code /api/device/place},
  *       {@code /api/orgs...}, {@code /api/folders...}, {@code /api/homes...} and {@code /api/groups/move} and
  *       {@code /api/groups/order} are the owner's own data</li>
  * </ul>
@@ -139,6 +140,8 @@ public final class WebServer {
                 deviceHome(exchange);
             } else if (method.equals("POST") && path.equals("/api/device/order")) {
                 deviceOrder(exchange);
+            } else if (method.equals("POST") && path.equals("/api/device/place")) {
+                devicePlace(exchange);
             } else if (method.equals("POST") && path.equals("/api/homes")) {
                 groupCreate(exchange, AccountStore.Kind.HOME);
             } else if (method.equals("POST") && path.equals("/api/homes/rename")) {
@@ -633,7 +636,7 @@ public final class WebServer {
         groupResult(exchange, accounts.reorderGroup(call.session().player(), id, before), null);
     }
 
-    /** {@code POST /api/device/home {key, home}}: "" for no home. */
+    /** {@code POST /api/device/home {key, home}}: an organization, folder or home id; "" for none. */
     private void deviceHome(HttpExchange exchange) throws IOException {
         Call call = signedInCall(exchange);
         if (call == null) return;
@@ -643,7 +646,24 @@ public final class WebServer {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        groupResult(exchange, accounts.setHome(call.session().player(), key, home), AccountStore.Kind.HOME);
+        groupResult(exchange, accounts.setHome(call.session().player(), key, home), null);
+    }
+
+    /**
+     * {@code POST /api/device/place {key, group, before}}: what a drag and drop does. Puts a device in an
+     * organization, folder or home ("" for none) and just before another device there ("" for the end).
+     */
+    private void devicePlace(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String key = text(call.body(), "key");
+        String group = text(call.body(), "group");
+        String before = text(call.body(), "before");
+        if (key == null || group == null || before == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        groupResult(exchange, accounts.placeDevice(call.session().player(), key, group, before), null);
     }
 
     /** {@code POST /api/device/order {key, before}}: just before another device of the same home; "" for the end. */
@@ -656,7 +676,7 @@ public final class WebServer {
             json(exchange, 400, error("Bad request"));
             return;
         }
-        groupResult(exchange, accounts.reorderDevice(call.session().player(), key, before), AccountStore.Kind.HOME);
+        groupResult(exchange, accounts.reorderDevice(call.session().player(), key, before), null);
     }
 
     /** A name from the body's "name", tidied. Answers the client and returns null if it isn't allowed. */

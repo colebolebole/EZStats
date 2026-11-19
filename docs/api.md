@@ -165,7 +165,7 @@ Every device has these fields:
 | `label` | Its own name (the thermostat's or sign's label), or `""` for a device that has none. |
 | `world`, `x`, `y`, `z` | Its world's name and block. |
 | `nickname` | Optional. The name its owner gave it. |
-| `home` | The id of the home it is in, or `""`. |
+| `home` | The id of the organization, folder or home it is in, or `""`. (It is called `home` from when only homes held devices.) |
 | `weather` | Optional, thermostats only: `{ "station": "<key>", "distance": 98 }`, its nearest weather station and how many blocks away. Absent when no working station is in range. |
 | `loaded` | Optional, thermostats, equipment and units (not vents or instruments), **EZvac BETA 1.0 Pilot 8 or newer**. `true` when the device's chunk is loaded; `false` when it is running unattended: since Pilot 8 EZvac keeps a house running from what it last saw there while nobody is near. The website doesn't show this; the field is there for other clients. Absent on an older EZvac. |
 
@@ -348,7 +348,8 @@ top):
 
 - an **organization** (up to **10**) sits at the top and holds folders and homes;
 - a **folder** (up to **40**) holds folders and homes;
-- a **home** (up to **20**) holds devices.
+- a **home** (up to **20**) holds devices. A device can also be in an organization or folder directly (its
+  `home` field is the id of whichever group it is in).
 
 Names are 1 to 32 characters, no control characters, and unique among what sits side by side (same
 `parent`), ignoring case. An organization is only at the top; a folder or home goes in an organization or a
@@ -361,11 +362,12 @@ top, at most 4). They are the player's own: nothing is shared with other players
 | `POST /api/folders` | `{ "name": "Kyleton", "parent": "<org or folder id>" }` | Makes a folder. `parent` is optional (the top). |
 | `POST /api/homes` | `{ "name": "House 1", "parent": "<org or folder id>" }` | Makes a home. `parent` is optional. |
 | `POST /api/orgs/rename`, `/api/folders/rename`, `/api/homes/rename` | `{ "id": "a1b2c3d4", "name": "New name" }` | Renames one of that kind. |
-| `POST /api/orgs/delete`, `/api/folders/delete`, `/api/homes/delete` | `{ "id": "a1b2c3d4" }` | Deletes it. Nothing inside is deleted: it moves up to where the deleted one was (a home's devices go to no home). |
+| `POST /api/orgs/delete`, `/api/folders/delete`, `/api/homes/delete` | `{ "id": "a1b2c3d4" }` | Deletes it. Nothing inside is deleted: the groups and devices it held move up to where the deleted one was (devices of a top-level group go to no group). |
 | `POST /api/groups/move` | `{ "id": "a1b2c3d4", "parent": "<org or folder id>" }` | Moves a folder or home, with what it holds. `"parent": ""` is the top. |
 | `POST /api/groups/order` | `{ "id": "a1b2c3d4", "before": "e5f6a7b8" }` | Puts a group just before another in the same place. `"before": ""` is the end. |
-| `POST /api/device/home` | `{ "key": "7f1c...:12:64:-30", "home": "a1b2c3d4" }` | Puts a device you own in a home. `"home": ""` takes it out of any. |
-| `POST /api/device/order` | `{ "key": "7f1c...:12:64:-30", "before": "7f1c...:13:64:-30" }` | Puts a device just before another device of the same home (or both in no home). `"before": ""` is the end of its home. |
+| `POST /api/device/home` | `{ "key": "7f1c...:12:64:-30", "home": "a1b2c3d4" }` | Puts a device you own in an organization, folder or home (any group id; the field keeps its old name). `"home": ""` takes it out of any. |
+| `POST /api/device/order` | `{ "key": "7f1c...:12:64:-30", "before": "7f1c...:13:64:-30" }` | Puts a device just before another device in the same place (or both in none). `"before": ""` is the end of its place. |
+| `POST /api/device/place` | `{ "key": "7f1c...:12:64:-30", "group": "a1b2c3d4", "before": "7f1c...:13:64:-30" }` | What a drag and drop does, in one call: puts a device in a group (`""` for none) and just before another device already there. `"before": ""`, or a device that isn't in that group, puts it at the end. |
 
 A route works only on groups of its kind: `/api/homes/rename` with a folder's id is `404`.
 

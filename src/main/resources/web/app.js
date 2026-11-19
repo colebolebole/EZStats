@@ -31,6 +31,8 @@ let writable = false;
 let lastKey = "";
 let data = null;               // what is on the page now
 let editing = false;           // while a name is being typed the page is left alone
+let dragging = null;           // the key of the device being dragged: the page is left alone then too
+let pickingUntil = 0;          // while a menu is open (until this time) the page is left alone: see below
 const forecastOpen = new Set(); // keys of the thermostats whose forecast is showing
 let fullscreen = false;        // true only while a card is being built for the full-screen view
 let detail = null;             // the device or station shown full screen: { kind: "device" | "station", key }
@@ -301,13 +303,114 @@ async function nudgeGroup(node, direction) {
   refresh();
 }
 
-/** Moves a device just before another device of its home, or to the end of it ("" for the end). */
+/** Moves a device just before another device of its place, or to the end of it ("" for the end). */
 async function reorderDevice(d, before) {
   try { await post("/api/device/order", { key: d.key, before }); }
   catch (e) { toast(e.message); }
   lastKey = "";
   refresh();
 }
+
+// --- drag and drop: a device goes where it is dropped -----------------------------------------------
+//
+// Drag a card by its grip. Dropped on another device it goes just before that one (in that device's place);
+// dropped on an organization, folder or home (its title or an empty part of it) it goes to the end of it;
+// dropped on the strip that appears at the bottom, it is taken out of its group. The page doesn't redraw
+// while a device is being dragged, and everything is sent to the server in one call when it is dropped.
+
+let dropMark = null; // the element that shows where the device would go, and the class it has
+
+function markDrop(el, className) {
+  if (dropMark && dropMark.el === el && dropMark.className === className) return;
+  clearDropMark();
+  if (el) { el.classList.add(className); dropMark = { el, className }; }
+}
+
+function clearDropMark() {
+  if (dropMark) dropMark.el.classList.remove(dropMark.className);
+  dropMark = null;
+}
+
+function endDrag(redraw = true) {
+  dragging = null;
+  clearDropMark();
+  document.body.classList.remove("is-dragging");
+  $("drop-out").hidden = true;
+  for (const card of document.querySelectorAll(".card.dragging")) card.classList.remove("dragging");
+  if (redraw) { lastKey = ""; refresh(); }
+}
+
+async function dropDevice(key, group, before) {
+  try { await post("/api/device/place", { key, group, before }); }
+  catch (e) { toast(e.message); }
+  lastKey = "";
+  refresh();
+}
+
+/** The grip of a card: dragging it drags the whole card. Null where the page can't drag. */
+function dragGrip(d) {
+  const grip = el("span", "grip");
+  grip.draggable = true;
+  grip.title = "Drag to move " + deviceName(d) + " into a home, folder or organization, or before another device";
+  grip.appendChild(iconSvg("M7 4h.01M13 4h.01M7 10h.01M13 10h.01M7 16h.01M13 16h.01"));
+  grip.addEventListener("dragstart", (event) => {
+    if (editing) { event.preventDefault(); return; }
+    dragging = d.key;
+    event.dataTransfer.setData("text/plain", d.key);
+    event.dataTransfer.effectAllowed = "move";
+    const card = grip.closest(".card");
+    if (card) {
+      event.dataTransfer.setDragImage(card, 28, 20);
+      card.classList.add("dragging");
+    }
+    document.body.classList.add("is-dragging");
+    $("drop-out").hidden = tree.nodes.size === 0;
+  });
+  grip.addEventListener("dragend", () => endDrag());
+  return grip;
+}
+
+/** Makes a card take drops: a dragged device goes just before it, in the place the card's device is. */
+function acceptOnCard(card, d) {
+  card.addEventListener("dragover", (event) => {
+    if (!dragging || dragging === d.key) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    markDrop(card, "drop-before");
+  });
+  card.addEventListener("drop", (event) => {
+    if (!dragging) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const key = dragging;
+    endDrag(false);
+    if (key !== d.key) dropDevice(key, d.home || "", d.key);
+  });
+}
+
+/** Makes part of a group take drops: a dragged device goes to the end of it. `id` is "" for no group. */
+function acceptOnGroup(zone, section, id) {
+  zone.addEventListener("dragover", (event) => {
+    if (!dragging) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    markDrop(section, "drop-target");
+  });
+  zone.addEventListener("drop", (event) => {
+    if (!dragging) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const key = dragging;
+    endDrag(false);
+    dropDevice(key, id, "");
+  });
+}
+
+// Anything a drag passes over that isn't a place to drop clears the mark.
+document.addEventListener("dragover", () => { if (dragging) clearDropMark(); });
+document.addEventListener("drop", (event) => { if (dragging) { event.preventDefault(); endDrag(); } });
 
 async function moveToHome(d, homeId) {
   try { await post("/api/device/home", { key: d.key, home: homeId }); }
@@ -760,6 +863,7 @@ function deviceHead(d, pill) {
   titles.appendChild(el("div", "sub", deviceWhere(d).join(" · ")));
   head.appendChild(titles);
   const side = el("div", "head-side");
+  if (!fullscreen) side.appendChild(dragGrip(d));
   const place = !fullscreen && arranging ? neighbors.get(d.key) : null;
   if (place) {
     const earlier = arrowButton("Move " + title + " earlier", "◀", () => reorderDevice(d, place.earlier), !place.canEarlier);
@@ -834,16 +938,29 @@ function arrowButton(label, glyph, onClick, disabled) {
   return button;
 }
 
-/** The "Home" menu of a card, or null when the player has made no homes. */
-function homePicker(d, homes) {
-  if (!homes.length) return null;
+/** Every organization, folder and home in tree order, labelled with its path. */
+function placeChoices() {
+  const choices = [];
+  const walk = (nodes) => {
+    for (const node of nodes) {
+      choices.push({ value: node.id, label: pathOf(node.id) });
+      walk(node.children);
+    }
+  };
+  walk(tree.roots);
+  return choices;
+}
+
+/** The "In" menu of a card, or null when the player has made no groups. */
+function homePicker(d) {
+  if (tree.nodes.size === 0) return null;
   const label = el("label", "home-pick");
-  label.append("Home ");
+  label.append("In ");
   const select = el("select");
-  select.setAttribute("aria-label", "Home for " + deviceName(d));
+  select.setAttribute("aria-label", "Where to keep " + deviceName(d));
   select.appendChild(new Option("No home", ""));
-  // A home is named with where it is ("Acme Co / Kyleton / House 1") so two homes of one name can be told apart.
-  for (const h of homes) select.appendChild(new Option(pathOf(h.id) || h.name, h.id));
+  // Named with where it is ("Acme Co / Kyleton / House 1") so two homes of one name can be told apart.
+  for (const choice of placeChoices()) select.appendChild(new Option(choice.label, choice.value));
   select.value = d.home || "";
   select.addEventListener("change", () => moveToHome(d, select.value));
   label.appendChild(select);
@@ -909,7 +1026,9 @@ function deviceGrids(list, homes) {
         canLater: i < members.length - 1,
         later: i + 2 < members.length ? members[i + 2].key : "", // "" is the end of the home
       });
-      grid.appendChild(deviceCard(d, homes));
+      const card = deviceCard(d, homes);
+      acceptOnCard(card, d);
+      grid.appendChild(card);
     });
     box.appendChild(grid);
   }
@@ -948,11 +1067,12 @@ function buildTree(state) {
   }
   const byHome = new Map();
   const loose = [];
+  // A device is in an organization, folder or home (byHome has the devices of each, by group id).
   for (const device of state.devices) {
-    const home = nodes.get(device.home);
-    if (home && home.kind === "home") {
-      if (!byHome.has(home.id)) byHome.set(home.id, []);
-      byHome.get(home.id).push(device);
+    const place = nodes.get(device.home);
+    if (place) {
+      if (!byHome.has(place.id)) byHome.set(place.id, []);
+      byHome.get(place.id).push(device);
     } else {
       loose.push(device);
     }
@@ -962,8 +1082,8 @@ function buildTree(state) {
 
 /** How many devices are in a group, counting what is inside the groups in it. */
 function deviceCount(node) {
-  if (node.kind === "home") return (tree.byHome.get(node.id) || []).length;
-  return node.children.reduce((sum, child) => sum + deviceCount(child), 0);
+  const own = (tree.byHome.get(node.id) || []).length;
+  return own + node.children.reduce((sum, child) => sum + deviceCount(child), 0);
 }
 
 /** Folders before homes, each in the order its owner arranged them. */
@@ -1033,21 +1153,19 @@ function groupSection(node, homes, depth) {
     head.appendChild(actions);
   }
 
-  if (kind === "org" || kind === "folder") {
-    const kids = orderedChildren(node);
-    if (kids.length === 0) {
-      content.appendChild(el("p", "home-empty",
-        `Nothing in this ${GROUP_NOUN[kind]} yet. Make a folder or home inside it with New, or use Move on one.`));
-    }
-    for (const child of kids) content.appendChild(groupSection(child, homes, depth + 1));
-  } else {
-    const list = node ? tree.byHome.get(node.id) || [] : tree.loose;
-    if (list.length === 0) {
-      content.appendChild(el("p", "home-empty", "Nothing here yet. Use the Home menu on a device to move it in."));
-    } else {
-      content.appendChild(deviceGrids(list, homes));
-    }
+  // Devices first (an organization or folder can hold some of its own), then the groups inside.
+  const kids = kind === "org" || kind === "folder" ? orderedChildren(node) : [];
+  const list = node ? tree.byHome.get(node.id) || [] : tree.loose;
+  if (list.length) content.appendChild(deviceGrids(list, homes));
+  for (const child of kids) content.appendChild(groupSection(child, homes, depth + 1));
+  if (list.length === 0 && kids.length === 0) {
+    content.appendChild(el("p", "home-empty", kind === "none"
+      ? "Nothing here yet."
+      : `Nothing in this ${GROUP_NOUN[kind]} yet. Drag a device here, or use the In menu on a device.`));
   }
+  // A device can be dropped on the title, or on any part of the group that isn't a card.
+  acceptOnGroup(head, group, id === NO_HOME ? "" : id);
+  acceptOnGroup(content, group, id === NO_HOME ? "" : id);
   group.append(head, content);
   sync();
   return group;
@@ -1133,7 +1251,9 @@ async function refresh() {
     if (response.status === 401) return renderUnlinked();
     if (!response.ok) throw new Error("HTTP " + response.status);
     const d = await response.json();
-    if (editing || changing.size > 0) return; // not while a name is typed or a dial is being turned
+    // Not while a name is typed, a dial is being turned, a device is being dragged or a menu is open: redrawing
+    // would replace what the hand is holding, and an open menu would snap shut.
+    if (editing || changing.size > 0 || dragging || Date.now() < pickingUntil) return;
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
     const s = d.state;
     if (Number.isFinite(s.generatedAt)) skewMs = s.generatedAt - Date.now();
@@ -1145,11 +1265,24 @@ async function refresh() {
   }
 }
 
+// A running device changes every second, and the page is redrawn when it does, which would close a menu
+// someone is choosing from. A menu can't be asked whether it is open, so the page waits while one has been
+// touched in the last ten seconds, and stops waiting the moment a choice is made or the menu loses focus.
+const MENU_HOLD_MS = 10000;
+const isMenu = (event) => event.target && event.target.tagName === "SELECT";
+for (const type of ["focusin", "pointerdown", "keydown"]) {
+  document.addEventListener(type, (event) => { if (isMenu(event)) pickingUntil = Date.now() + MENU_HOLD_MS; });
+}
+for (const type of ["focusout", "change"]) {
+  document.addEventListener(type, (event) => { if (isMenu(event)) pickingUntil = 0; });
+}
+
 $("detail-close").addEventListener("click", closeDetail);
 document.addEventListener("keydown", (event) => {
   // Escape inside a rename form cancels the rename, not the full-screen view behind it.
   if (event.key === "Escape" && detail && !editing && !(event.target.closest && event.target.closest("form.rename"))) closeDetail();
 });
+acceptOnGroup($("drop-out"), $("drop-out"), "");
 $("new-org").addEventListener("click", () => startNew("org"));
 $("new-folder").addEventListener("click", () => startNew("folder"));
 $("new-home").addEventListener("click", () => startNew("home"));

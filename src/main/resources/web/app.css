@@ -253,6 +253,42 @@ button.small[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
 .title-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 1rem; flex-wrap: wrap; }
 .title-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
+/* Dragging a device: its grip, the card in the air, and where it would land */
+.grip {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.7rem;
+  color: var(--faint);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.grip svg { width: 15px; height: 15px; stroke-width: 2.6; }
+.card:hover .grip, .grip:focus-visible, body.is-dragging .grip { opacity: 0.8; }
+.grip:hover { color: var(--text); }
+.grip:active { cursor: grabbing; }
+@media (hover: none) { .grip { display: none; } } /* touch can't drag: use Arrange and the In menu */
+.card.dragging { opacity: 0.45; }
+.card.drop-before { box-shadow: -4px 0 0 0 var(--cool); }
+.group.drop-target { outline: 2px dashed var(--cool); outline-offset: 6px; border-radius: 10px; }
+.drop-out {
+  position: fixed;
+  left: 50%;
+  bottom: 1.1rem;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 0.7rem 1.4rem;
+  border: 2px dashed var(--faint);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.drop-out.drop-target { border-color: var(--cool); color: var(--cool); outline: 0; }
+
 /* Organizations, folders and homes nest */
 .group-kind {
   color: var(--faint);

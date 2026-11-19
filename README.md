@@ -45,7 +45,8 @@ become homes, and what you owned stays yours.
    website's **QuickLogin** tab.
 4. Give a device a nickname: look at it and run **`/ezstats nick Living Room`**, or click the pencil
    next to its name on the website. Nicknames are saved with your account.
-5. Group devices into homes on the website: click **New home**, then use the **Home** menu on each device.
+5. Group devices on the website: click **New home** (or **New folder** or **New organization**), then drag
+   a device by its grip into it, or use the **In** menu on the device.
 6. Change a device: drag the dial of a thermostat, or use the buttons and menus on a device's card.
 
 Don't reuse a password from anywhere else: commands you type can appear in the server's console
@@ -70,22 +71,33 @@ Acme Co            (organization)
 - An **organization** sits at the top and holds folders and homes: make one, then put your folders and homes
   in it. Everything is yours alone: other players don't see your organizations, and an organization is a
   way to arrange your own devices, not a group of players.
+- A device can be in **any** of the three: in a home, or straight in a folder or an organization, or in none.
 
 **New organization**, **New folder** and **New home** make one; for a folder or home, **Inside** picks where
-it goes. The pencil renames, **Move** moves a folder or home (with everything in it) into an organization or
-folder, and a device's **Home** menu puts it in a home (shown with its path, "Acme Co / Kyleton / House 1").
-**Delete** removes only that group: what was in it isn't deleted, it moves up a level (a home's devices go
-back to "No home").
+it goes. The pencil renames, and **Move** moves a folder or home (with everything in it) into an organization
+or folder. **Delete** removes only that group: what was in it isn't deleted, it moves up a level (devices
+that were directly in a top-level group go back to "No home").
+
+**Moving a device:** drag it by the **grip** (⋮⋮, at the top right of its card, shown when you point at it):
+
+- drop it **on another device** and it goes just before that one, in that device's place;
+- drop it **on the title or an empty part of a home, folder or organization** and it goes to the end of it;
+- drop it on the strip that appears at the bottom while you drag, **"Drop here to take it out of its
+  group"**, to take it out of every group.
+
+The page waits while you drag. On a touch screen, where dragging doesn't work, use the **In** menu on the
+card (it lists every organization, folder and home with its path, like "Acme Co / Kyleton / House 1") and
+**Arrange**.
 
 Rules: an organization stays at the top; a folder or home goes in an organization or a folder, never inside
 itself, and no more than 5 levels deep. Names are up to 32 characters and unique among what sits side by
 side. You can have up to 10 organizations, 40 folders and 20 homes. They are saved in `accounts.yml`, and a
-device leaves its home when it is released or removed.
+device leaves its group when it is released or removed.
 
-**Changing the order:** click **Arrange**. Every device gets **◀ ▶** buttons and every organization,
-folder and home gets **▲ ▼**: they move it one place earlier or later among the ones beside it (a device
-among the devices of its home, dials among dials and tiles among tiles). Click **Done** when finished. The
-order is saved. Until you arrange them, devices are in the order you claimed them.
+**Changing the order:** drag, or click **Arrange**. Every device gets **◀ ▶** buttons and every
+organization, folder and home gets **▲ ▼**: they move it one place earlier or later among the ones beside
+it (a device among the devices of its place, dials among dials and tiles among tiles). Click **Done** when
+finished. The order is saved. Until you arrange them, devices are in the order you claimed them.
 
 **Folding away:** click the arrow (or the name) at the left of any title to hide what is inside, and
 click again to show it. What is folded is remembered in your browser, not on the server.

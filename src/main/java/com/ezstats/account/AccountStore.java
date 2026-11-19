@@ -37,7 +37,7 @@ public final class AccountStore {
         final Map<String, String> nicknames = new LinkedHashMap<>();
         /** The account's organizations, folders and homes, in the order they were made. */
         final List<Group> groups = new ArrayList<>();
-        /** A device's key to the id of the home it is in. A device in no home has no entry. */
+        /** A device's key to the id of the organization, folder or home it is in. A device in none has no entry. */
         final Map<String, String> homeOf = new LinkedHashMap<>();
     }
 
@@ -159,7 +159,7 @@ public final class AccountStore {
                     Object key = placed.get("key");
                     Object homeId = placed.get(oldNames ? "folder" : "home");
                     if (key != null && homeId != null && account.owned.contains(key.toString())
-                            && hasHome(account, homeId.toString())) {
+                            && hasGroup(account, homeId.toString())) {
                         account.homeOf.put(key.toString(), homeId.toString());
                     }
                 }
@@ -277,8 +277,8 @@ public final class AccountStore {
     }
 
     /**
-     * Deletes a group of the given kind. Nothing inside it is deleted: what it held moves up to where it was
-     * (a deleted home's devices go back to being in no home).
+     * Deletes a group of the given kind. Nothing inside it is deleted: the groups and devices it held move up
+     * to where it was (at the top level, devices go back to being in no group).
      */
     public synchronized GroupStatus delete(UUID player, Kind kind, String id) {
         Account account = accounts.get(player);
@@ -286,7 +286,8 @@ public final class AccountStore {
         if (group == null) return GroupStatus.NOT_FOUND;
         account.groups.replaceAll(g -> g.parent().equals(id) ? new Group(g.id(), g.name(), g.kind(), group.parent()) : g);
         account.groups.removeIf(g -> g.id().equals(id));
-        if (kind == Kind.HOME) account.homeOf.values().removeIf(id::equals);
+        if (group.parent().isEmpty()) account.homeOf.values().removeIf(id::equals);
+        else account.homeOf.replaceAll((device, place) -> place.equals(id) ? group.parent() : place);
         save();
         return GroupStatus.OK;
     }
@@ -307,24 +308,44 @@ public final class AccountStore {
         return GroupStatus.OK;
     }
 
-    /** Puts an owned device in a home, or in none when {@code homeId} is empty. */
-    public synchronized GroupStatus setHome(UUID player, String key, String homeId) {
+    /**
+     * Puts an owned device in an organization, folder or home, or in none when {@code groupId} is empty. (The
+     * name is from when only homes held devices.)
+     */
+    public synchronized GroupStatus setHome(UUID player, String key, String groupId) {
         Account account = accounts.get(player);
         if (account == null || !account.owned.contains(key)) return GroupStatus.NOT_OWNED;
-        if (homeId.isEmpty()) {
-            account.homeOf.remove(key);
-        } else {
-            if (!hasHome(account, homeId)) return GroupStatus.NOT_FOUND;
-            account.homeOf.put(key, homeId);
-        }
+        if (!groupId.isEmpty() && !hasGroup(account, groupId)) return GroupStatus.NOT_FOUND;
+        putIn(account, key, groupId);
         save();
         return GroupStatus.OK;
+    }
+
+    /**
+     * Drag and drop: puts an owned device in a group (or in none, with an empty {@code groupId}) and just
+     * before another device already there, or at the end when {@code before} is empty or isn't there.
+     */
+    public synchronized GroupStatus placeDevice(UUID player, String key, String groupId, String before) {
+        Account account = accounts.get(player);
+        if (account == null || !account.owned.contains(key)) return GroupStatus.NOT_OWNED;
+        if (!groupId.isEmpty() && !hasGroup(account, groupId)) return GroupStatus.NOT_FOUND;
+        putIn(account, key, groupId);
+        boolean there = !before.isEmpty() && !before.equals(key) && account.owned.contains(before)
+                && account.homeOf.getOrDefault(before, "").equals(groupId);
+        moveBefore(account, key, there ? before : "");
+        save();
+        return GroupStatus.OK;
+    }
+
+    private static void putIn(Account account, String key, String groupId) {
+        if (groupId.isEmpty()) account.homeOf.remove(key);
+        else account.homeOf.put(key, groupId);
     }
 
     // --- order -----------------------------------------------------------------------------
 
     /**
-     * Moves an owned device to just before another of the same home, or to the end of its home when
+     * Moves an owned device to just before another in the same place, or to the end of what is there when
      * {@code before} is empty. The order is the order of the account's devices, which is saved.
      */
     public synchronized GroupStatus reorderDevice(UUID player, String key, String before) {
@@ -334,17 +355,24 @@ public final class AccountStore {
         if (!before.isEmpty()) {
             if (!account.owned.contains(before)) return GroupStatus.NOT_FOUND;
             if (!account.homeOf.getOrDefault(key, "").equals(account.homeOf.getOrDefault(before, ""))) {
-                return GroupStatus.INVALID; // only within a home
+                return GroupStatus.INVALID; // only among the devices of one place
             }
         }
+        moveBefore(account, key, before);
+        save();
+        return GroupStatus.OK;
+    }
+
+    /** Reorders the account's devices so {@code key} is just before {@code before}, or last of its place. */
+    private static void moveBefore(Account account, String key, String before) {
         List<String> order = new ArrayList<>(account.owned);
         order.remove(key);
         if (before.isEmpty()) {
-            // The end of its home: just after the last device that shares it.
-            String home = account.homeOf.getOrDefault(key, "");
+            // The end of its place: just after the last device that shares it.
+            String place = account.homeOf.getOrDefault(key, "");
             int at = 0;
             for (int i = 0; i < order.size(); i++) {
-                if (account.homeOf.getOrDefault(order.get(i), "").equals(home)) at = i + 1;
+                if (account.homeOf.getOrDefault(order.get(i), "").equals(place)) at = i + 1;
             }
             order.add(at, key);
         } else {
@@ -352,8 +380,6 @@ public final class AccountStore {
         }
         account.owned.clear();
         account.owned.addAll(order);
-        save();
-        return GroupStatus.OK;
     }
 
     /**
@@ -396,8 +422,8 @@ public final class AccountStore {
         return group != null && group.kind() == kind ? group : null;
     }
 
-    private static boolean hasHome(Account account, String id) {
-        return find(account, Kind.HOME, id) != null;
+    private static boolean hasGroup(Account account, String id) {
+        return byId(account, id) != null;
     }
 
     private static void replace(Account account, Group changed) {
