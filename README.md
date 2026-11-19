@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="EZStats logo" width="240">
+</p>
+
 # EZStats
 
 A web dashboard for [EZvac](https://github.com/EZvac-Plugin/EZvac). Players make a website account in
