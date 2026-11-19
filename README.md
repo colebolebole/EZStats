@@ -25,7 +25,7 @@ switched off, the website is read-only and says why.
 
 ## Install
 
-1. Put `EZStats-0.8.1.jar` in `plugins/` next to EZvac.
+1. Put `EZStats-0.8.2.jar` in `plugins/` next to EZvac.
 2. Start the server once, then edit `plugins/EZStats/config.yml`: set `web.public-url` to the
    address players open, and make sure the port (default `8765`) is reachable.
 3. `/ezstats reload`.
@@ -89,9 +89,27 @@ that were directly in a top-level group go back to "No home").
 - drop it on the strip that appears at the bottom while you drag, **"Drop here to take it out of its
   group"**, to take it out of every group.
 
-The page waits while you drag. On a touch screen, where dragging doesn't work, use the **In** menu on the
-card (it lists every organization, folder and home with its path, like "Acme Co / Kyleton / House 1") and
-**Arrange**.
+**Moving a home, folder or organization:** drag it by the grip at the left of its title, with everything in
+it. Where you drop it decides what happens:
+
+- on the **middle or bottom of an organization's or folder's title**, or on an **empty part** of one: it goes
+  **into** it (at the end);
+- on the **top of a folder's title**, when you are dragging a folder: it goes **before** that folder, in the
+  same place;
+- on the **top half of a home's title** (dragging a home): **before** it; on the **bottom half**: **after**
+  it, and into whatever folder or organization that home is in;
+- dragging an **organization**: onto the top half of another organization, **before** it, or the bottom
+  half, **after** it. Organizations only sit at the top;
+- on the strip at the bottom, **"Drop here to move it to the top level"**: out of every folder and
+  organization.
+
+A blue outline shows "into", and a blue line shows "before" or "after". You can't drop a group onto itself
+or what is inside it, and a home can't hold a folder; the same rules as Move apply (5 levels at most,
+and names unique beside each other).
+
+The page waits while you drag. On a touch screen, where dragging doesn't work, use the **In** menu on a
+device (it lists every organization, folder and home with its path, like "Acme Co / Kyleton / House 1"),
+**Move** on a group, and **Arrange**.
 
 Rules: an organization stays at the top; a folder or home goes in an organization or a folder, never inside
 itself, and no more than 5 levels deep. Names are up to 32 characters and unique among what sits side by
@@ -292,7 +310,7 @@ checks ownership before it calls either.
 mvn package
 ```
 
-The jar is `target/EZStats-0.8.1.jar`. EZvac's API comes from JitPack and is `provided`: never
+The jar is `target/EZStats-0.8.2.jar`. EZvac's API comes from JitPack and is `provided`: never
 shade it in.
 
 ## License

@@ -39,8 +39,8 @@ import java.util.logging.Logger;
  *   <li>{@code POST /api/device/control} changes a device, through the {@link DeviceControl}</li>
  *   <li>{@code POST /api/device/nickname}, {@code /api/device/home}, {@code /api/device/order},
  *       {@code /api/device/place},
- *       {@code /api/orgs...}, {@code /api/folders...}, {@code /api/homes...} and {@code /api/groups/move} and
- *       {@code /api/groups/order} are the owner's own data</li>
+ *       {@code /api/orgs...}, {@code /api/folders...}, {@code /api/homes...} and {@code /api/groups/move},
+ *       {@code /api/groups/order} and {@code /api/groups/place} are the owner's own data</li>
  * </ul>
  *
  * <p>Every {@code POST} needs the header {@code X-EZStats} and a JSON body of at most 4096 bytes. Keep
@@ -164,6 +164,8 @@ public final class WebServer {
                 groupMove(exchange);
             } else if (method.equals("POST") && path.equals("/api/groups/order")) {
                 groupOrder(exchange);
+            } else if (method.equals("POST") && path.equals("/api/groups/place")) {
+                groupPlace(exchange);
             } else if (method.equals("POST") && path.equals("/api/login")) {
                 login(exchange);
             } else if (method.equals("POST") && path.equals("/api/quicklogin")) {
@@ -621,6 +623,23 @@ public final class WebServer {
             return;
         }
         groupResult(exchange, accounts.move(call.session().player(), id, parent), null);
+    }
+
+    /**
+     * {@code POST /api/groups/place {id, parent, before}}: what dragging a group does, in one call. Moves it
+     * into an organization or folder ("" for the top) and just before another group there ("" for the end).
+     */
+    private void groupPlace(HttpExchange exchange) throws IOException {
+        Call call = signedInCall(exchange);
+        if (call == null) return;
+        String id = text(call.body(), "id");
+        String parent = text(call.body(), "parent");
+        String before = text(call.body(), "before");
+        if (id == null || parent == null || before == null) {
+            json(exchange, 400, error("Bad request"));
+            return;
+        }
+        groupResult(exchange, accounts.placeGroup(call.session().player(), id, parent, before), null);
     }
 
     /** {@code POST /api/groups/order {id, before}}: just before a group in the same place; "" for the end. */

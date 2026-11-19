@@ -32,6 +32,7 @@ let lastKey = "";
 let data = null;               // what is on the page now
 let editing = false;           // while a name is being typed the page is left alone
 let dragging = null;           // the key of the device being dragged: the page is left alone then too
+let draggingGroup = null;      // the organization, folder or home being dragged (the node of the tree)
 let pickingUntil = 0;          // while a menu is open (until this time) the page is left alone: see below
 const forecastOpen = new Set(); // keys of the thermostats whose forecast is showing
 let fullscreen = false;        // true only while a card is being built for the full-screen view
@@ -333,12 +334,18 @@ function clearDropMark() {
 
 function endDrag(redraw = true) {
   dragging = null;
+  draggingGroup = null;
   clearDropMark();
   document.body.classList.remove("is-dragging");
   $("drop-out").hidden = true;
-  for (const card of document.querySelectorAll(".card.dragging")) card.classList.remove("dragging");
+  for (const card of document.querySelectorAll(".card.dragging, .group.dragging-group")) {
+    card.classList.remove("dragging", "dragging-group");
+  }
   if (redraw) { lastKey = ""; refresh(); }
 }
+
+const OUT_DEVICE = "Drop here to take it out of its group";
+const OUT_GROUP = "Drop here to move it to the top level";
 
 async function dropDevice(key, group, before) {
   try { await post("/api/device/place", { key, group, before }); }
@@ -364,10 +371,92 @@ function dragGrip(d) {
       card.classList.add("dragging");
     }
     document.body.classList.add("is-dragging");
+    $("drop-out").textContent = OUT_DEVICE;
     $("drop-out").hidden = tree.nodes.size === 0;
   });
   grip.addEventListener("dragend", () => endDrag());
   return grip;
+}
+
+/** The grip of an organization, folder or home title: dragging it drags the whole group, with what is in it. */
+function groupGrip(node, section, head) {
+  const grip = el("span", "grip group-grip");
+  grip.draggable = true;
+  grip.title = "Drag to move " + node.name + (node.kind === "org"
+    ? " before or after another organization"
+    : " into an organization or folder, or beside another");
+  grip.appendChild(iconSvg("M7 4h.01M13 4h.01M7 10h.01M13 10h.01M7 16h.01M13 16h.01"));
+  grip.addEventListener("dragstart", (event) => {
+    if (editing) { event.preventDefault(); return; }
+    draggingGroup = node;
+    event.dataTransfer.setData("text/plain", node.id);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setDragImage(head, 24, 16);
+    section.classList.add("dragging-group");
+    document.body.classList.add("is-dragging");
+    // Only something below the top needs the "top level" strip.
+    $("drop-out").textContent = OUT_GROUP;
+    $("drop-out").hidden = node.parent === "";
+  });
+  grip.addEventListener("dragend", () => endDrag());
+  return grip;
+}
+
+/** Whether `node` is `ancestorId` or somewhere inside it. */
+function isInside(node, ancestorId) {
+  for (let at = node, steps = 0; at && steps < 12; at = tree.nodes.get(at.parent), steps++) {
+    if (at.id === ancestorId) return true;
+  }
+  return false;
+}
+
+function beforePlan(target) {
+  return { parent: target.parent, before: target.id, mark: "drop-line-before" };
+}
+
+function afterPlan(target, dragged) {
+  const siblings = siblingsOf(target);
+  let next = siblings[siblings.indexOf(target) + 1];
+  if (next && next.id === dragged.id) next = siblings[siblings.indexOf(target) + 2];
+  return { parent: target.parent, before: next ? next.id : "", mark: "drop-line-after" };
+}
+
+/**
+ * What dropping the dragged group on this part of the page would do, or null if it can't go there.
+ * {parent, before} is where it would land, and `mark` how to show it. On the title of a group: the top of
+ * a folder beside the dragged folder means "before it", the rest of an organization's or folder's title
+ * "into it"; on a home's title the top half means before it and the bottom half after it. On the empty
+ * part of an organization or folder: into it. An organization only goes before or after another one.
+ */
+function groupPlan(section, target, isHead, event) {
+  const g = draggingGroup;
+  if (section.id === "drop-out") return g.parent === "" ? null : { parent: "", before: "", mark: "drop-target" };
+  if (!target) return null;
+  // Not onto itself or what it holds, and not on to whatever holds those either: that would quietly move it.
+  if (target.id === g.id || isInside(target, g.id)) return STOP;
+  const head = section.querySelector(":scope > .group-head");
+  const rect = head.getBoundingClientRect();
+  const frac = isHead ? (event.clientY - rect.top) / Math.max(1, rect.height) : 1;
+  if (g.kind === "org") {
+    if (target.kind !== "org" || !isHead) return null;
+    return frac < 0.5 ? beforePlan(target) : afterPlan(target, g);
+  }
+  if (target.kind !== "home") {
+    if (isHead && g.kind === target.kind && frac < 0.3) return beforePlan(target);
+    return { parent: target.id, before: "", mark: "drop-target" };
+  }
+  if (g.kind === "home" && isHead) return frac < 0.5 ? beforePlan(target) : afterPlan(target, g);
+  return null;
+}
+
+/** What {@link groupPlan} answers over the dragged group itself: nothing, and nothing behind it either. */
+const STOP = "stop";
+
+async function dropGroup(group, plan) {
+  try { await post("/api/groups/place", { id: group.id, parent: plan.parent, before: plan.before }); }
+  catch (e) { toast(e.message); }
+  lastKey = "";
+  refresh();
 }
 
 /** Makes a card take drops: a dragged device goes just before it, in the place the card's device is. */
@@ -389,9 +478,23 @@ function acceptOnCard(card, d) {
   });
 }
 
-/** Makes part of a group take drops: a dragged device goes to the end of it. `id` is "" for no group. */
-function acceptOnGroup(zone, section, id) {
+/**
+ * Makes part of a group take drops. A dragged device goes to the end of it (`id` is "" for no group). A
+ * dragged group goes where {@link groupPlan} says: `node` is this group's node (none for the strip at the
+ * bottom) and `isHead` whether this is its title.
+ */
+function acceptOnGroup(zone, section, id, node, isHead) {
   zone.addEventListener("dragover", (event) => {
+    if (draggingGroup) {
+      const plan = groupPlan(section, node, isHead, event);
+      if (plan === STOP) { event.stopPropagation(); clearDropMark(); return; }
+      if (!plan) return; // no place for it here: the drag goes on to whatever holds this
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      markDrop(section, plan.mark);
+      return;
+    }
     if (!dragging) return;
     event.preventDefault();
     event.stopPropagation();
@@ -399,6 +502,17 @@ function acceptOnGroup(zone, section, id) {
     markDrop(section, "drop-target");
   });
   zone.addEventListener("drop", (event) => {
+    if (draggingGroup) {
+      const plan = groupPlan(section, node, isHead, event);
+      if (plan === STOP) { event.stopPropagation(); return; }
+      if (!plan) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const group = draggingGroup;
+      endDrag(false);
+      dropGroup(group, plan);
+      return;
+    }
     if (!dragging) return;
     event.preventDefault();
     event.stopPropagation();
@@ -409,8 +523,10 @@ function acceptOnGroup(zone, section, id) {
 }
 
 // Anything a drag passes over that isn't a place to drop clears the mark.
-document.addEventListener("dragover", () => { if (dragging) clearDropMark(); });
-document.addEventListener("drop", (event) => { if (dragging) { event.preventDefault(); endDrag(); } });
+document.addEventListener("dragover", () => { if (dragging || draggingGroup) clearDropMark(); });
+document.addEventListener("drop", (event) => {
+  if (dragging || draggingGroup) { event.preventDefault(); endDrag(); }
+});
 
 async function moveToHome(d, homeId) {
   try { await post("/api/device/home", { key: d.key, home: homeId }); }
@@ -1122,6 +1238,7 @@ function groupSection(node, homes, depth) {
   }
   const heading = el("h2", "", name);
   heading.addEventListener("click", flip);
+  if (node) titles.append(groupGrip(node, group, head));
   titles.append(toggle);
   if (node) titles.appendChild(el("span", "group-kind", GROUP_TITLE[kind]));
   titles.append(heading);
@@ -1163,9 +1280,9 @@ function groupSection(node, homes, depth) {
       ? "Nothing here yet."
       : `Nothing in this ${GROUP_NOUN[kind]} yet. Drag a device here, or use the In menu on a device.`));
   }
-  // A device can be dropped on the title, or on any part of the group that isn't a card.
-  acceptOnGroup(head, group, id === NO_HOME ? "" : id);
-  acceptOnGroup(content, group, id === NO_HOME ? "" : id);
+  // A device or group can be dropped on the title, or on any part of the group that isn't a card.
+  acceptOnGroup(head, group, id === NO_HOME ? "" : id, node, true);
+  acceptOnGroup(content, group, id === NO_HOME ? "" : id, node, false);
   group.append(head, content);
   sync();
   return group;
@@ -1253,7 +1370,7 @@ async function refresh() {
     const d = await response.json();
     // Not while a name is typed, a dial is being turned, a device is being dragged or a menu is open: redrawing
     // would replace what the hand is holding, and an open menu would snap shut.
-    if (editing || changing.size > 0 || dragging || Date.now() < pickingUntil) return;
+    if (editing || changing.size > 0 || dragging || draggingGroup || Date.now() < pickingUntil) return;
     // Don't rebuild the page when nothing changed: it keeps focus on a button being used.
     const s = d.state;
     if (Number.isFinite(s.generatedAt)) skewMs = s.generatedAt - Date.now();
@@ -1282,7 +1399,7 @@ document.addEventListener("keydown", (event) => {
   // Escape inside a rename form cancels the rename, not the full-screen view behind it.
   if (event.key === "Escape" && detail && !editing && !(event.target.closest && event.target.closest("form.rename"))) closeDetail();
 });
-acceptOnGroup($("drop-out"), $("drop-out"), "");
+acceptOnGroup($("drop-out"), $("drop-out"), "", null, false);
 $("new-org").addEventListener("click", () => startNew("org"));
 $("new-folder").addEventListener("click", () => startNew("folder"));
 $("new-home").addEventListener("click", () => startNew("home"));

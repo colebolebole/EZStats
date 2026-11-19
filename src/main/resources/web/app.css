@@ -266,7 +266,22 @@ button.small[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
   transition: opacity 0.12s;
 }
 .grip svg { width: 15px; height: 15px; stroke-width: 2.6; }
-.card:hover .grip, .grip:focus-visible, body.is-dragging .grip { opacity: 0.8; }
+.card:hover .grip, .group-head:hover .grip, .grip:focus-visible, body.is-dragging .grip { opacity: 0.8; }
+.group-grip { align-self: center; }
+.group { position: relative; }
+.group.dragging-group { opacity: 0.45; }
+.group.drop-line-before::before, .group.drop-line-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--cool);
+  pointer-events: none;
+}
+.group.drop-line-before::before { top: -0.7rem; }
+.group.drop-line-after::after { bottom: -0.7rem; }
 .grip:hover { color: var(--text); }
 .grip:active { cursor: grabbing; }
 @media (hover: none) { .grip { display: none; } } /* touch can't drag: use Arrange and the In menu */

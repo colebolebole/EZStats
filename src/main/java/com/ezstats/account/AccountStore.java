@@ -396,7 +396,34 @@ public final class AccountStore {
             if (other == null) return GroupStatus.NOT_FOUND;
             if (!other.parent().equals(group.parent())) return GroupStatus.INVALID;
         }
-        account.groups.remove(group);
+        insertGroup(account, group, before);
+        save();
+        return GroupStatus.OK;
+    }
+
+    /**
+     * Drag and drop: moves an organization, folder or home into {@code parent} (an organization or folder id;
+     * "" for the top) and just before another group there, or at the end when {@code before} is empty or isn't
+     * there. The same rules as {@link #move}: an organization stays at the top, nothing goes inside itself or
+     * what it holds or too deep, and names stay unique beside each other.
+     */
+    public synchronized GroupStatus placeGroup(UUID player, String id, String parent, String before) {
+        Account account = accounts.get(player);
+        Group group = account == null ? null : byId(account, id);
+        if (group == null) return GroupStatus.NOT_FOUND;
+        GroupStatus fits = fits(account, group.kind(), id, parent);
+        if (fits != GroupStatus.OK) return fits;
+        if (!parent.equals(group.parent()) && nameTaken(account, group.name(), parent, id)) return GroupStatus.DUPLICATE;
+        Group placed = new Group(id, group.name(), group.kind(), parent);
+        Group other = before.isEmpty() || before.equals(id) ? null : byId(account, before);
+        insertGroup(account, placed, other != null && other.parent().equals(parent) ? before : "");
+        save();
+        return GroupStatus.OK;
+    }
+
+    /** Puts {@code group} (replacing its old entry) just before {@code before}, or last among its siblings. */
+    private static void insertGroup(Account account, Group group, String before) {
+        account.groups.removeIf(g -> g.id().equals(group.id()));
         if (before.isEmpty()) {
             int at = 0;
             for (int i = 0; i < account.groups.size(); i++) {
@@ -408,8 +435,6 @@ public final class AccountStore {
             for (int i = 0; i < account.groups.size(); i++) if (account.groups.get(i).id().equals(before)) target = i;
             account.groups.add(target, group);
         }
-        save();
-        return GroupStatus.OK;
     }
 
     private static Group byId(Account account, String id) {
