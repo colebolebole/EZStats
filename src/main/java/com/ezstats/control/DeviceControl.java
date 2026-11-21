@@ -33,6 +33,11 @@ public interface DeviceControl {
     /** The profile of a thermostat's system: {@code eco}, {@code normal} or {@code turbo}. */
     Result setProfile(UUID actor, String key, String profile);
 
+    /** A car's climate control mode: {@code auto}, {@code cool} or {@code heat}. Only cars have one. */
+    default Result setMode(UUID actor, String key, String mode) {
+        return Result.failure(400, "That device has no mode to set.");
+    }
+
     // ---- Dehumidifiers, humidifiers, air purifiers, fridges and freezers ----
 
     Result setPowered(UUID actor, String key, boolean powered);

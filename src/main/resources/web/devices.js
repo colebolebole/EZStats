@@ -1,4 +1,5 @@
-"use strict";
+    if (!d.enabled && !d.occupied && d.loaded && Number.isFinite(d.remoteStartMinutes) && d.remoteStartMinutes > 0) {
+      body.appendChild"use strict";
 
 // Tiles for every EZvac device that isn't a thermostat: equipment, humidifiers and dehumidifiers, air
 // purifiers, fridges and freezers, vents, and the sensors and monitors. Controls only appear when the
@@ -34,6 +35,7 @@ const TYPE_NAME = {
   air_monitor: "Air monitor",
   air_sensor: "Air sensor",
   wind_sensor: "Wind sensor",
+  car_climate: "Car climate",
 };
 
 const UNIT_STATE = {
@@ -134,6 +136,7 @@ function deviceTile(d, homes) {
     case "unit": pill = unitTile(d, body); break;
     case "instrument": instrumentTile(d, body); break;
     case "vent": ventTile(d, body); break;
+    case "car": pill = carTile(d, body); break;
     default: body.appendChild(el("div", "cap", "This kind of device isn't shown yet."));
   }
   node.appendChild(deviceHead(d, pill));
@@ -275,4 +278,66 @@ function instrumentTile(d, body) {
 
 function ventTile(d, body) {
   body.appendChild(el("div", "cap", d.type === "water" ? "Carries water for a pool or radiant system." : "Blows conditioned air into its room."));
+}
+
+// --- a car's climate control (MTVehicles) -----------------------------------------------------------
+
+const CAR_MODES = ["auto", "cool", "heat"];
+const CAR_MODE_NAME = { auto: "Auto", cool: "A/C", heat: "Heater" };
+const CAR_FANS = ["auto", "1", "2", "3"];
+
+/**
+ * The climate control of a car: the temperature inside, a target, the mode and the fan. Switching it on while
+ * nobody sits in the car starts it for a while ("remote start"), so it is comfortable when its owner gets in.
+ * Its pill says what it is doing, like a thermostat's.
+ */
+function carTile(d, body) {
+  if (Number.isFinite(d.cabinF)) {
+    body.appendChild(readout(fahrenheitText(d.cabinF), "Inside the car"));
+  } else {
+    body.appendChild(readout("–", d.loaded ? "Not measured yet" : "Parked, not loaded"));
+  }
+
+  const facts = el("div", "stats");
+  if (writable && Number.isFinite(d.targetF)) {
+    const low = Number.isFinite(d.minTargetF) ? d.minTargetF : 60;
+    const high = Number.isFinite(d.maxTargetF) ? d.maxTargetF : 85;
+    body.appendChild(stepper(d, "target", "Target", d.targetF, fahrenheitText,
+      (v, dir) => Math.min(high, Math.max(low, fahrenheitStep(v, dir))), (v) => act(d.key, "target", v)));
+
+    const mode = el("div", "profile-row");
+    mode.appendChild(el("span", "profile-label", "Mode"));
+    mode.appendChild(segmented("Mode of " + deviceName(d), CAR_MODES, d.climateMode, (name) => act(d.key, "mode", name),
+      (name) => CAR_MODE_NAME[name]));
+    body.appendChild(mode);
+
+    const fan = el("div", "profile-row");
+    fan.appendChild(el("span", "profile-label", "Fan"));
+    fan.appendChild(segmented("Fan of " + deviceName(d), CAR_FANS, d.fan, (name) => act(d.key, "fan", name)));
+    body.appendChild(fan);
+  } else {
+    if (Number.isFinite(d.targetF)) fact(facts, "Target", fahrenheitText(d.targetF));
+    fact(facts, "Mode", CAR_MODE_NAME[d.climateMode] || cap(d.climateMode || "auto"));
+    fact(facts, "Fan", cap(d.fan || "auto"));
+  }
+  if (Number.isFinite(d.ambientF)) fact(facts, "Outside", fahrenheitText(d.ambientF));
+  if (d.occupied) fact(facts, "", "Someone is in it");
+  if (d.remote && Number.isFinite(d.remoteSecondsLeft)) {
+    fact(facts, "Remote start", Math.max(1, Math.ceil(d.remoteSecondsLeft / 60)) + " min left");
+  }
+  if (facts.childNodes.length) body.appendChild(facts);
+
+  if (writable) {
+    const power = actionButton(d.enabled ? "Switch off" : "Switch on", (d.enabled ? "Switch off " : "Switch on ") + deviceName(d),
+      () => act(d.key, "enabled", !d.enabled), d.enabled);
+    const buttons = el("div", "tile-actions");
+    buttons.appendChild(power);
+    body.appendChild(buttons);
+    if (!d.enabled && !d.occupied && d.loaded && Number.isFinite(d.remoteStartMinutes) && d.remoteStartMinutes > 0) {
+      body.appendChild(el("div", "cap", `Switching it on while nobody is in it runs it for ${d.remoteStartMinutes} minutes.`));
+    }
+  }
+
+  const text = !d.enabled ? "Off" : d.running ? (d.mode === "heating" ? "Heating" : "Cooling") : "On";
+  return el("span", "pill " + (d.enabled && d.running ? (d.mode === "heating" ? "heating" : "cooling") : ""), text);
 }

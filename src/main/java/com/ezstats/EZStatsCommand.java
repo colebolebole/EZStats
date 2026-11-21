@@ -1,6 +1,7 @@
 package com.ezstats;
 
 import com.ezstats.account.AccountStore;
+import com.ezstats.car.CarClimates;
 import com.ezstats.account.Nicknames;
 import com.ezstats.account.PasswordHasher;
 import com.ezstats.link.LinkManager;
@@ -43,12 +44,18 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     private final EzvacApi api;
     private final LinkManager links;
     private final AccountStore accounts;
+    private CarClimates cars;
 
     EZStatsCommand(EZStatsPlugin plugin, EzvacApi api, LinkManager links, AccountStore accounts) {
         this.plugin = plugin;
         this.api = api;
         this.links = links;
         this.accounts = accounts;
+    }
+
+    /** Cars from MTVehicles: with this, {@code own} and {@code disown} work on the car the player is sitting in. */
+    void setCars(CarClimates cars) {
+        this.cars = cars;
     }
 
     @Override
@@ -128,6 +135,11 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
             say(player, "Use /ezstats own, or /ezstats own system to claim its whole system.", NamedTextColor.RED);
             return;
         }
+        Optional<String> car = cars == null ? Optional.empty() : cars.licenseOf(player);
+        if (car.isPresent()) {
+            ownCar(player, car.get());
+            return;
+        }
         Optional<HvacDevice> found = lookedAt(player);
         if (found.isEmpty()) {
             say(player, "Look at a device's sign, button or dispenser within " + (int) REACH
@@ -154,6 +166,52 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
             case ALREADY_YOURS -> say(player, "The " + name + " is already yours.", NamedTextColor.YELLOW);
             case TAKEN -> say(player, "The " + name + " belongs to " + result.owner()
                     + ". They (or an admin) can release it with /ezstats disown.", NamedTextColor.RED);
+        }
+    }
+
+    /**
+     * {@code /ezstats own} in a car: puts the climate control of the car the player is sitting in on their page.
+     * Their car, with its climate control linked in game ({@code /vehicle hvac link}).
+     */
+    private void ownCar(Player player, String license) {
+        UUID id = player.getUniqueId();
+        if (!cars.ownerOf(license).equals(Optional.of(id))) {
+            say(player, "This vehicle isn't yours, so you can't put its climate control on your page.", NamedTextColor.RED);
+            return;
+        }
+        if (!cars.isLinked(license)) {
+            say(player, "Link its climate control first with /vehicle hvac link, then run /ezstats own again.", NamedTextColor.RED);
+            return;
+        }
+        accounts.touch(id, player.getName());
+        AccountStore.OwnResult result = accounts.own(id, player.getName(), CarClimates.keyOf(license));
+        String name = "climate control of " + license;
+        switch (result.status()) {
+            case CLAIMED -> {
+                say(player, "The " + name + " is now yours. It shows on your EZStats page.", NamedTextColor.GREEN);
+                if (!accounts.hasPassword(id)) {
+                    say(player, "You haven't set a password: use /ezstats register <password> to sign in "
+                            + "with one, or /ezstats quicklogin for a QuickLogin code.", NamedTextColor.GRAY);
+                }
+            }
+            case ALREADY_YOURS -> say(player, "The " + name + " is already yours.", NamedTextColor.YELLOW);
+            case TAKEN -> say(player, "The " + name + " belongs to " + result.owner()
+                    + ". They (or an admin) can release it with /ezstats disown.", NamedTextColor.RED);
+        }
+    }
+
+    /** {@code /ezstats disown} in a car: lets go of its climate control. */
+    private void disownCar(Player player, String license) {
+        String key = CarClimates.keyOf(license);
+        String name = "climate control of " + license;
+        Optional<UUID> owner = accounts.ownerOf(key);
+        if (owner.isEmpty()) {
+            say(player, "Nobody owns the " + name + ".", NamedTextColor.YELLOW);
+        } else if (!owner.get().equals(player.getUniqueId()) && !player.hasPermission("ezstats.admin")) {
+            say(player, "The " + name + " belongs to " + accounts.name(owner.get()) + ".", NamedTextColor.RED);
+        } else {
+            accounts.release(key);
+            say(player, "The " + name + " is no longer owned by anyone.", NamedTextColor.GREEN);
         }
     }
 
@@ -198,6 +256,11 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     private void disown(CommandSender sender) {
         Player player = playerOnly(sender, "Only a player can look at a device.");
         if (player == null) return;
+        Optional<String> car = cars == null ? Optional.empty() : cars.licenseOf(player);
+        if (car.isPresent()) {
+            disownCar(player, car.get());
+            return;
+        }
         Optional<HvacDevice> found = lookedAt(player);
         if (found.isEmpty()) {
             say(player, "Look at a device within " + (int) REACH + " blocks, then run /ezstats disown.",

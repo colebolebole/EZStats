@@ -4,6 +4,7 @@ main: com.ezstats.EZStatsPlugin
 api-version: '1.21'
 description: A web dashboard for EZvac thermostats.
 depend: [EZvac]
+softdepend: [MTVehicles]
 commands:
   ezstats:
     description: Register a website account, claim thermostats, and sign in to the EZStats website.

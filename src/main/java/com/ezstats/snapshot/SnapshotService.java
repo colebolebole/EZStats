@@ -1,6 +1,7 @@
 package com.ezstats.snapshot;
 
 import com.ezstats.account.AccountStore;
+import com.ezstats.car.CarClimates;
 import com.ezstats.control.DeviceControl;
 import com.ezstats.runs.RunLog;
 import com.github.blade.hvac.api.AirQuality;
@@ -56,6 +57,9 @@ public final class SnapshotService {
     private final DeviceControl control;
     private final Supplier<Set<String>> ownedKeys;
 
+    /** Cars with a climate control (MTVehicles), or null when that plugin isn't there. */
+    private volatile CarClimates cars;
+
     private volatile RunLog runLog;
     private volatile Snapshot snapshot;
     private volatile Weather weather = new Weather(Map.of(), Map.of(), NO_WEATHER);
@@ -63,6 +67,7 @@ public final class SnapshotService {
     private BukkitTask weatherTask;
     private boolean warned;
     private boolean weatherWarned;
+    private boolean carWarned;
 
     public SnapshotService(Plugin plugin, EzvacApi api, DeviceControl control, Supplier<Set<String>> ownedKeys) {
         this.plugin = plugin;
@@ -171,6 +176,11 @@ public final class SnapshotService {
         return array;
     }
 
+    /** Where cars come from: the owned devices whose key starts with {@code car:}. Null leaves cars out. */
+    public void setCars(CarClimates source) {
+        this.cars = source;
+    }
+
     /** Where the last runs of each thermostat come from. Without one, no thermostat has a log. */
     public void setRunLog(RunLog log) {
         this.runLog = log;
@@ -229,9 +239,30 @@ public final class SnapshotService {
                 if (owned.contains(key)) devices.put(key, DeviceJson.of(api, world, device));
             }
         }
+        addCars(owned, devices);
         return new Snapshot(System.currentTimeMillis(), api.units().name(), control.writable(),
                 api.pluginVersion(), api.apiVersion(), worlds, devices);
     }
+    /**
+     * The owned cars, as devices: only those whose owner still has their climate control linked, and a car that
+     * can't be read leaves the others alone.
+     */
+    private void addCars(Set<String> owned, Map<String, JsonObject> devices) {
+        CarClimates source = cars;
+        if (source == null) return;
+        for (String key : owned) {
+            if (!CarClimates.isCarKey(key)) continue;
+            String license = CarClimates.licenseOfKey(key);
+            try {
+                if (!source.isLinked(license)) continue;
+                source.describe(license).ifPresent(car -> devices.put(key, CarJson.of(license, car)));
+            } catch (RuntimeException e) {
+                if (!carWarned) plugin.getLogger().log(Level.WARNING, "Could not read the car " + license + " for the website", e);
+                carWarned = true;
+            }
+        }
+    }
+
     // --- weather ----------------------------------------------------------------------------
 
     private void refreshWeather() {

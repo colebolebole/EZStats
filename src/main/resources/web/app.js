@@ -960,7 +960,8 @@ function deviceWhere(d) {
   const parts = [];
   if (d.nickname && d.label) parts.push(d.label);
   if (d.kind !== "thermostat" && !d.label && d.nickname) parts.push(typeName(d));
-  parts.push(`${d.world} ${d.x}, ${d.y}, ${d.z}`);
+  if (d.kind === "car" && !d.loaded) parts.push("parked, not loaded");
+  else parts.push(`${d.world} ${d.x}, ${d.y}, ${d.z}`);
   if (d.pool) parts.push("pool");
   if (d.mini) parts.push("mini");
   if (d.system) parts.push("system " + d.system);

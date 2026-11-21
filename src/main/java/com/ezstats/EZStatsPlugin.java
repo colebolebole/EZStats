@@ -2,6 +2,8 @@ package com.ezstats;
 
 import com.ezstats.account.AccountStore;
 import com.ezstats.account.OwnershipListener;
+import com.ezstats.car.CarClimates;
+import com.ezstats.control.CarAwareControl;
 import com.ezstats.control.Controls;
 import com.ezstats.control.DeviceControl;
 import com.ezstats.link.LinkManager;
@@ -26,6 +28,7 @@ public final class EZStatsPlugin extends JavaPlugin {
     private SnapshotService snapshots;
     private RunLog runs;
     private WebServer web;
+    private CarClimates cars;
     private String publicUrl;
 
     @Override
@@ -52,12 +55,16 @@ public final class EZStatsPlugin extends JavaPlugin {
         // Controlling devices needs API 1.12; set once at start, so changing control.enabled needs a restart.
         control = Controls.create(this, api, config.getBoolean("control.enabled", true),
                 apiAtLeast(api.apiVersion(), 1, 12));
+        // Cars from MTVehicles (if it is there) are devices too: changes to their keys go to MTVehicles.
+        cars = CarClimates.create(this);
+        if (cars != null) control = new CarAwareControl(control, cars);
         // API 1.13 (Pilot 8) says whether a device's chunk is loaded and how long a thermostat has been in its mode.
         DeviceJson.setApi113(apiAtLeast(api.apiVersion(), 1, 13));
         links = new LinkManager(codeTtl(config), config.getLong("session.ttl-hours", 72));
         accounts = new AccountStore(new File(getDataFolder(), "accounts.yml"), getLogger());
         accounts.load();
         snapshots = new SnapshotService(this, api, control, accounts::allOwned);
+        snapshots.setCars(cars);
         getServer().getPluginManager().registerEvents(new OwnershipListener(accounts), this);
 
         // The last few heating and cooling runs of every thermostat, for the log on its card. Saved off the
@@ -69,6 +76,7 @@ public final class EZStatsPlugin extends JavaPlugin {
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, runs::saveIfChanged, 600L, 600L);
 
         EZStatsCommand command = new EZStatsCommand(this, api, links, accounts);
+        command.setCars(cars);
         PluginCommand registered = getCommand("ezstats");
         if (registered != null) {
             registered.setExecutor(command);

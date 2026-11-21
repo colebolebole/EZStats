@@ -435,7 +435,7 @@ public final class WebServer {
     /**
      * {@code POST /api/device/control {key, action, value}}: changes a device through the
      * {@link DeviceControl}. Only its owner may, whatever the control behind this can do. The action is one of
-     * {@code target}, {@code enabled}, {@code profile} (a thermostat); {@code powered}, {@code setpoint},
+     * {@code target}, {@code enabled}, {@code profile} (a thermostat); {@code target}, {@code enabled}, {@code mode}, {@code fan} (a car's climate control); {@code powered}, {@code setpoint},
      * {@code fridge-setpoint}, {@code fan}, {@code defrost}, {@code auto-defrost} (a humidifier, purifier,
      * fridge or freezer); {@code equipment-enabled} (a heat pump, AC, furnace or boiler). A device that can't do
      * what is asked answers with EZvac's own message.
@@ -475,14 +475,17 @@ public final class WebServer {
                 result = action.equals("setpoint") ? control.setSetpoint(player, key, value)
                         : control.setFridgeSetpoint(player, key, value);
             }
-            case "profile", "fan" -> {
+            case "profile", "fan", "mode" -> {
                 String value = text(body, "value");
                 if (value == null) {
                     json(exchange, 400, error("Bad request"));
                     return;
                 }
-                result = action.equals("profile") ? control.setProfile(player, key, value)
-                        : control.setFan(player, key, value);
+                result = switch (action) {
+                    case "profile" -> control.setProfile(player, key, value);
+                    case "mode" -> control.setMode(player, key, value);
+                    default -> control.setFan(player, key, value);
+                };
             }
             case "enabled", "powered", "auto-defrost", "equipment-enabled" -> {
                 Boolean value = flag(body, "value");

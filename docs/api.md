@@ -214,6 +214,8 @@ two-stage, 3 variable), `system` (the label of its thermostat, or `""`).
 `temperature_sensor`, `humidity_sensor`, `temperature_humidity_sensor`, `weather_sensor`, `sensor_hub`,
 `rpm_monitor`, `settings_panel`, `air_monitor`, `air_sensor` or `wind_sensor`
 
+**`kind: "car"`**, with `type` `car_climate`: the climate control of a car from [MTVehicles](https://github.com/colebolebole/MinetopiaVehicles) (see [Cars](../README.md#cars-mtvehicles)). Its `key` is `car:<license plate>` and its `label` the vehicle's name, not a world and block. It has `license`, `enabled` (the climate control is on), `running` (heating or cooling right now), `mode` (`cooling`, `heating` or `idle`, like a thermostat), `climateMode` (`auto`, `cool` or `heat`), `fan` (`auto`, `1`, `2` or `3`), `targetF`, `minTargetF`, `maxTargetF`, `cabinF` and `ambientF` (the temperature inside and around it; optional, only while the car has been driven or started remotely lately), `remote` (it runs without a driver) with `remoteSecondsLeft`, `remoteStartMinutes` (how long a remote start lasts, `0` for none), `occupied`, and `loaded`: whether the car is spawned in a loaded chunk. `world`, `x`, `y` and `z` are where it is, and `world` is `""` while it isn't `loaded`.
+
 `system` (optional, for monitors and panels linked to one), `links` (how many sensors a hub shows, or
 units an RPM monitor shows), and `reading`, optional: read from the spot the instrument stands on, and
 only while its chunk is loaded. A `reading` holds some of `tempF`, `humidity`, `weather`, `air`
@@ -291,13 +293,14 @@ records them as "Last changed by", and EZvac's cancellable `DeviceControlEvent` 
 
 | `action` | On | `value` | Does |
 | --- | --- | --- | --- |
-| `target` | thermostat | number, °F | Sets the target. EZvac keeps it in range (60 to 85, pool 75 to 104). |
-| `enabled` | thermostat | `true` or `false` | Switches its whole system on or off. |
+| `target` | thermostat, car | number, °F | Sets the target. EZvac keeps a thermostat in range (60 to 85, pool 75 to 104), and MTVehicles a car (60 to 85 by default). |
+| `enabled` | thermostat, car | `true` or `false` | Switches its whole system, or a car's climate control, on or off. Switching a car on while nobody is in it starts it for a while (a remote start). |
 | `profile` | thermostat | `"eco"`, `"normal"` or `"turbo"` | Sets its system's profile. |
 | `powered` | dehumidifier, humidifier, air purifier, fridge, freezer | `true` or `false` | Switches it on or off. |
 | `setpoint` | dehumidifier, humidifier, fridge, freezer, refrigerator's freezer | whole number | % RH (to its nearest preset), or °F. |
 | `fridge-setpoint` | refrigerator | whole number, °F | The fridge compartment's target. |
-| `fan` | air purifier | `"low"`, `"medium"`, `"high"` or `"auto"` | Sets the fan. |
+| `fan` | air purifier, car | `"low"`, `"medium"`, `"high"` or `"auto"`; for a car `"auto"`, `"1"`, `"2"` or `"3"` | Sets the fan. |
+| `mode` | car | `"auto"`, `"cool"` or `"heat"` | Sets the car's climate mode. |
 | `defrost` | deep freezer, refrigerator | none | Starts a defrost. |
 | `auto-defrost` | refrigerator | `true` or `false` | Whether its freezer defrosts itself. |
 | `equipment-enabled` | heat pump, AC, furnace, boiler, pool heat pump | `true` or `false` | Switches it on or off. |

@@ -238,7 +238,7 @@ off, set `weather-tab.enabled: false` in `config.yml`.
 | --- | --- | --- |
 | `/ezstats register <password>` | `ezstats.use` (everyone) | Makes your website account and sets its password |
 | `/ezstats password <new>` | `ezstats.use` | Changes your password and signs every browser out |
-| `/ezstats own` | `ezstats.use` | Claims the device you're looking at: any thermostat, equipment, humidifier, sensor... |
+| `/ezstats own` | `ezstats.use` | Claims the device you're looking at: any thermostat, equipment, humidifier, sensor... Sitting in one of your cars (with its climate control linked), it claims the car's climate control instead |
 | `/ezstats own system` | `ezstats.use` | Claims the device you're looking at and every device of its system: the thermostat, its equipment, vents, panels and monitors |
 | `/ezstats nick [nickname]` (or `rename`) | `ezstats.use` | Names the device you're looking at, up to 32 characters, on your EZStats page. With no nickname it goes back to its own name. The sign itself is unchanged: EZvac's API can't rename, and `/hvac rename` does that |
 | `/ezstats disown` | `ezstats.use` | Lets go of the device you're looking at. Admins can free anyone's |
@@ -249,6 +249,16 @@ off, set `weather-tab.enabled: false` in `config.yml`.
 | `/ezstats reload` | `ezstats.admin` (ops) | Reads `config.yml` again and restarts the website |
 
 `/ezs` works too.
+
+## Cars (MTVehicles)
+
+With [MTVehicles](https://github.com/colebolebole/MinetopiaVehicles) installed (a version with its car climate control, `hvac.enabled`), the climate control of a car can be on your page too, next to your thermostats: the temperature inside, a target, the mode (auto, A/C, heater) and the fan, with the same buttons as everywhere. EZStats finds MTVehicles by itself; nothing to configure.
+
+1. Sit in your car and run **`/vehicle hvac link`** (MTVehicles): the owner of a vehicle links it.
+2. Still in the car, run **`/ezstats own`**. The car's climate control is now yours, and shows on your page with the nickname and home you give it.
+3. On the website, change the target, mode and fan. Switching it **on while nobody is in the car** starts it for a while (`hvac.remoteStartMinutes` in MTVehicles' config, 10 by default, it uses fuel) so the car is comfortable when you get in.
+
+Only the car's owner can change it, and a car is only listed while its owner keeps it linked (`/vehicle hvac unlink` takes it off). While the car isn't spawned in a loaded chunk the website can still change the settings, which apply when someone gets in. How a plugin talks to MTVehicles: [its car climate API](https://github.com/colebolebole/MinetopiaVehicles/blob/car-hvac/docs/car-climate-api.md). Changing devices from the website must be allowed (`control.enabled`) for cars too.
 
 ## Ownership
 
