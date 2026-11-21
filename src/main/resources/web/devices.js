@@ -1,5 +1,4 @@
-    if (!d.enabled && !d.occupied && d.loaded && Number.isFinite(d.remoteStartMinutes) && d.remoteStartMinutes > 0) {
-      body.appendChild"use strict";
+"use strict";
 
 // Tiles for every EZvac device that isn't a thermostat: equipment, humidifiers and dehumidifiers, air
 // purifiers, fridges and freezers, vents, and the sensors and monitors. Controls only appear when the
