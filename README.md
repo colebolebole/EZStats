@@ -250,12 +250,12 @@ off, set `weather-tab.enabled: false` in `config.yml`.
 
 `/ezs` works too.
 
-## Cars (MTVehicles)
+## Vehicles (MTVehicles)
 
-With [MTVehicles](https://github.com/colebolebole/MinetopiaVehicles) installed (a version with its car climate control, `hvac.enabled`), the climate control of a car can be on your page too, next to your thermostats: the temperature inside, a target, the mode (auto, A/C, heater) and the fan, with the same buttons as everywhere. EZStats finds MTVehicles by itself; nothing to configure.
+With [MTVehicles](https://github.com/colebolebole/MinetopiaVehicles) installed (a version with its car climate control, `hvac.enabled`), the climate control of a vehicle (a car, boat, aircraft... every vehicle has one) can be on your page too, next to your thermostats: the temperature inside, a target, the mode (auto, A/C, heater) and the fan, with the same buttons as everywhere. EZStats finds MTVehicles by itself; nothing to configure.
 
-1. Sit in your car and run **`/vehicle hvac link`** (MTVehicles): the owner of a vehicle links it.
-2. Still in the car, run **`/ezstats own`**. The car's climate control is now yours, and shows on your page with the nickname and home you give it.
+1. Sit in your vehicle and run **`/vehicle hvac link`** (MTVehicles): the owner of a vehicle links it. You can name its climate control in game with `/vehicle hvac rename <name>`.
+2. Still in the vehicle, run **`/ezstats own`**. Its climate control is now yours, and shows on your page. Give it a nickname on the page (the pencil next to its name) or with `/ezstats nick <nickname>` in the vehicle, and put it in a home, like any other device.
 3. On the website, change the target, mode and fan. Switching it **on while nobody is in the car** starts it for a while (`hvac.remoteStartMinutes` in MTVehicles' config, 10 by default, it uses fuel) so the car is comfortable when you get in.
 
 Only the car's owner can change it, and a car is only listed while its owner keeps it linked (`/vehicle hvac unlink` takes it off). While the car isn't spawned in a loaded chunk the website can still change the settings, which apply when someone gets in. How a plugin talks to MTVehicles: [its car climate API](https://github.com/colebolebole/MinetopiaVehicles/blob/car-hvac/docs/car-climate-api.md). Changing devices from the website must be allowed (`control.enabled`) for cars too.

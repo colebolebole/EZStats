@@ -288,6 +288,11 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
     private void nick(CommandSender sender, String[] args) {
         Player player = playerOnly(sender, "Only a player can look at a device.");
         if (player == null) return;
+        Optional<String> car = cars == null ? Optional.empty() : cars.licenseOf(player);
+        if (car.isPresent()) {
+            nickCar(player, car.get(), args);
+            return;
+        }
         Optional<HvacDevice> found = lookedAt(player);
         if (found.isEmpty()) {
             say(player, "Look at a device within " + (int) REACH + " blocks, then run /ezstats "
@@ -297,6 +302,32 @@ final class EZStatsCommand implements CommandExecutor, TabCompleter {
         HvacDevice device = found.get();
         String key = SnapshotService.key(device.position());
         String name = DeviceJson.describe(device);
+        if (!accounts.ownerOf(key).equals(Optional.of(player.getUniqueId()))) {
+            say(player, accounts.ownerOf(key).isPresent()
+                    ? "The " + name + " belongs to someone else."
+                    : "Claim the " + name + " first with /ezstats own.", NamedTextColor.RED);
+            return;
+        }
+        String nickname = Nicknames.clean(String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)));
+        if (nickname == null) {
+            say(player, "A nickname is at most " + Nicknames.MAX_LENGTH + " characters, with no control characters.",
+                    NamedTextColor.RED);
+            return;
+        }
+        accounts.setNickname(player.getUniqueId(), key, nickname);
+        say(player, nickname.isEmpty()
+                ? "The " + name + " is shown by its own name again."
+                : "The " + name + " is now called '" + nickname + "' on your EZStats page.",
+                NamedTextColor.GREEN);
+    }
+
+    /**
+     * {@code /ezstats nick <nickname>} in a vehicle: names its climate control on the player's page, like any other device.
+     * (Its own name in the game is {@code /vehicle hvac rename}.)
+     */
+    private void nickCar(Player player, String license, String[] args) {
+        String key = CarClimates.keyOf(license);
+        String name = "climate control of " + license;
         if (!accounts.ownerOf(key).equals(Optional.of(player.getUniqueId()))) {
             say(player, accounts.ownerOf(key).isPresent()
                     ? "The " + name + " belongs to someone else."

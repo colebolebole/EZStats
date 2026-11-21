@@ -34,7 +34,7 @@ const TYPE_NAME = {
   air_monitor: "Air monitor",
   air_sensor: "Air sensor",
   wind_sensor: "Wind sensor",
-  car_climate: "Car climate",
+  car_climate: "Vehicle climate",
 };
 
 const UNIT_STATE = {
@@ -292,7 +292,7 @@ const CAR_FANS = ["auto", "1", "2", "3"];
  */
 function carTile(d, body) {
   if (Number.isFinite(d.cabinF)) {
-    body.appendChild(readout(fahrenheitText(d.cabinF), "Inside the car"));
+    body.appendChild(readout(fahrenheitText(d.cabinF), "Inside the vehicle"));
   } else {
     body.appendChild(readout("–", d.loaded ? "Not measured yet" : "Parked, not loaded"));
   }

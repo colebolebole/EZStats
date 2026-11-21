@@ -17,7 +17,9 @@ final class CarJson {
         json.addProperty("key", CarClimates.keyOf(license));
         json.addProperty("kind", "car");
         json.addProperty("type", "car_climate");
-        json.addProperty("label", text(car, "name", license));
+        // Its own name (/vehicle hvac rename) if it has one, otherwise the vehicle's name - like the label of a thermostat's sign.
+        json.addProperty("label", text(car, "hvacName", text(car, "name", license)));
+        json.addProperty("vehicleName", text(car, "name", license));
         json.addProperty("license", license);
 
         boolean loaded = Boolean.TRUE.equals(car.get("loaded"));
